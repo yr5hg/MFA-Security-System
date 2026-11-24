@@ -39,3 +39,17 @@ def get_user_status(session):
         "voice_enrolled": voice_enrolled,
         "voice_verified": voice_verified
     }
+
+def check_access(session, required_roles):
+    if session is None:
+        return 401, "UNAUTHENTICATED", "Authentication is required."
+
+    status = get_user_status(session)
+
+    if not status["voice_verified"]:
+        return 403, "VOICE_NOT_VERIFIED", "Voice verification is required."
+
+    if not any(role in status["roles"] for role in required_roles):
+        return 403, "FORBIDDEN", "Insufficient permissions."
+
+    return None

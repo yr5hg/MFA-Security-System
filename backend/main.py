@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 from backend.database import init_db
 from backend.authorization import (
     get_current_session,
-    get_user_status
+    get_user_status,
+    check_access
 )
 
 
@@ -46,3 +47,51 @@ def get_me(request: Request):
         )
 
     return get_user_status(session)
+
+
+def access_error(error):
+    status_code, code, message = error
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": code,
+                "message": message
+            }
+        }
+    )
+
+
+@app.get("/api/protected")
+def protected_resource(request: Request):
+    session = get_current_session(request)
+
+    error = check_access(
+        session,
+        ["regular_user", "administrator"]
+    )
+
+    if error:
+        return access_error(error)
+
+    return {
+        "message": "Access granted to protected resource."
+    }
+
+
+@app.get("/api/admin")
+def admin_resource(request: Request):
+    session = get_current_session(request)
+
+    error = check_access(
+        session,
+        ["administrator"]
+    )
+
+    if error:
+        return access_error(error)
+
+    return {
+        "message": "Access granted to administrator resource."
+    }
