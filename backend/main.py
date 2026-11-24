@@ -1,8 +1,14 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
 from backend.database import init_db
+from backend.authorization import (
+    get_current_session,
+    get_user_status
+)
 
 
 @asynccontextmanager
@@ -22,3 +28,21 @@ app = FastAPI(
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/me")
+def get_me(request: Request):
+    session = get_current_session(request)
+
+    if session is None:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Authentication is required."
+                }
+            }
+        )
+
+    return get_user_status(session)
