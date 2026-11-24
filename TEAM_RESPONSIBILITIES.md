@@ -163,17 +163,32 @@ For cross-folder changes, coordinate first. Commit meaningful working checkpoint
 
 ### Implementation tasks, in order
 
-1. Set up a reproducible Python virtual environment; install **SpeechBrain**, **PyTorch**, audio dependencies and a small FastAPI server.
-2. Load the pretrained model **`speechbrain/spkrec-ecapa-voxceleb`**; record the model identifier and library versions.
-3. Run an initial **standalone script** comparing two local WAV files: one pair from the same speaker and another from different speakers.
-4. Validate the internal audio input format: **16-kHz, mono, 16-bit PCM WAV**. Reject empty/corrupted input and report service errors clearly.
-5. Implement `POST /internal/voice/compare` accepting exactly the multipart file fields `reference_audio` and `attempt_audio`.
-6. Extract or use embeddings and a similarity decision provided by SpeechBrain; return `matched`, numeric `score`, applied `threshold` and `model`. Example values are **illustrative**, not chosen defaults.
-7. Select a preliminary **threshold based on sample results**; keep threshold configuration outside code when practical. Never claim a universal threshold or model accuracy from a couple of samples.
-8. Help Hamzeh design separate data for threshold selection versus evaluation. Document number of speakers, test samples and any preprocessing decisions.
-9. Test multiple different-speaker and same-speaker examples; record error cases and processing time. Evaluate replayed audio **without suggesting that basic speaker matching guarantees liveness**.
-10. Restrict the API to local/backend-accessible networking; avoid logging full biometric recordings or sensitive file locations in normal responses.
+### Member 3 — Yousef Taha: AI Model & Speaker Verification
 
+1. Set up a reproducible Python virtual environment; install **SpeechBrain**, **PyTorch**, **FFmpeg**, required audio dependencies, and a small FastAPI server.
+
+2. Load the pretrained model **`speechbrain/spkrec-ecapa-voxceleb`**; record the model identifier and library versions.
+
+3. Run an initial **standalone script** comparing two local WAV files: one pair from the same speaker and another from different speakers.
+
+4. **Implement audio validation, conversion, and preprocessing** in the Voice Verification Service:
+   - Accept supported audio formats received from the Backend, such as WAV and WebM.
+   - Validate the actual audio content instead of relying only on file extensions.
+   - Use **FFmpeg or an equivalent tool** to convert recordings into **16-kHz, mono, 16-bit PCM WAV**.
+   - Verify the converted audio meets the required format before processing.
+   - Reject empty, corrupted, unsupported, or invalid recordings and report errors clearly.
+
+5. Implement `POST /internal/voice/compare`, accepting exactly the multipart file fields `reference_audio` and `attempt_audio`. Validate and preprocess both recordings before passing them to the model.
+
+6. Extract or use embeddings and a similarity decision provided by SpeechBrain; return `matched`, numeric `score`, applied `threshold`, and `model`. Example values are **illustrative**, not chosen defaults.
+
+7. Select a preliminary **threshold based on sample results**; keep threshold configuration outside code when practical. Never claim a universal threshold or model accuracy from a couple of samples.
+
+8. Help Hamzeh design separate data for threshold selection versus evaluation. Document the number of speakers, test samples, supported audio formats, and preprocessing decisions.
+
+9. Test multiple different-speaker and same-speaker examples; record error cases, audio conversion failures, and processing time. Evaluate replayed audio **without suggesting that basic speaker matching guarantees liveness**.
+
+10. Restrict the API to local/backend-accessible networking; avoid logging full biometric recordings or sensitive file locations in normal responses.
 ### Work Yousef can do immediately
 
 - Use two consented WAV samples and a simple Python script to confirm model download/inference and get a numeric comparison result.
@@ -226,18 +241,31 @@ Returns `200` for a successful comparison:
 ### Implementation tasks, in order
 
 1. Create the FastAPI main application and serve Sara's frontend under the same origin for the first demo.
+
 2. Implement `GET /auth/login`, `GET /auth/callback` and `POST /auth/logout` using the proposed Keycloak **OIDC Authorization Code Flow** with appropriate callback `state` checking, token validation and safe session handling.
+
 3. Implement a backend-managed session. Use a protected **HttpOnly** browser cookie and keep required auth/voice state on the server; avoid storing raw tokens in browser localStorage.
+
 4. Parse the trusted Keycloak account ID (`sub`) and application role claims; coordinate role mapper configuration with Omar.
+
 5. Implement `GET /api/me`, exposing only non-sensitive identity, role, enrollment and session voice-status fields.
+
 6. Implement `POST /api/voice/enroll` for the **current authenticated account only** and only after valid, recorded, short-lived administrator approval.
+
 7. Define storage for reference recordings or protected embeddings, keyed to Keycloak `sub`; restrict filesystem or database access. Agree on initial storage with the team (SQLite is optional, not mandatory).
-8. Implement audio upload validation and conversion from browser-supported formats to **16-kHz mono PCM WAV** (FFmpeg or equivalent). A file extension alone is not sufficient validation.
-9. Implement `POST /api/voice/verify`: retrieve the correct reference, normalize current attempt and call Yousef's `/internal/voice/compare` as a trusted internal request.
+
+8. Implement audio upload handling in the Main Backend. Enforce file size limits, securely receive recordings from Sara's frontend, and forward them to Yousef's Voice Verification Service for validation, conversion, and preprocessing. Handle errors returned by the service.
+
+9. Implement `POST /api/voice/verify`: retrieve the correct reference recording and send it with the current voice attempt to Yousef's `/internal/voice/compare` endpoint as a trusted internal request. The Voice Verification Service will handle audio validation, conversion, preprocessing, and comparison.
+
 10. Store `voice_verified=true` **only after a genuine successful internal comparison**, associated with the correct authenticated user, current session and active enrollment version. Clear it after logout, new session, expiration or enrollment replacement.
+
 11. Implement `/api/protected` (valid password session + voice pass) and `/api/admin` (those conditions + `administrator` role). Enforce access on **every HTTP request**, including direct curl calls.
+
 12. Implement proposed admin approval and voice reset endpoints **only after** the team specifies identity-evidence steps; preserve roles/password policy and invalidate old voice references/session passes on reset.
+
 13. Handle voice-service timeouts/outages with **fail-closed** logic. Add appropriate upload limits, attempt throttling and CSRF protection for state-changing browser routes.
+
 14. Document the end-to-end flow and create the architecture diagram for Proposed Model.
 
 ### Work Anas can do immediately
