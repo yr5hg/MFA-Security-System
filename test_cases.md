@@ -1,47 +1,55 @@
+
 # Expected vs observed test matrix (not yet executed)
+
+**Execution status: pending.** Hamzeh owns the independent testing record. A successful UI message alone does not prove that a protected operation was authorized.
+
+All tests must be performed in the authorized Kali Linux lab. Record actual results and sanitized evidence after execution. Do not publish credentials, OTP secrets, face images, or biometric templates.
 
 | ID | Case | Expected | Observed |
 |---|---|---|---|
-| T-01 | TOTP path: correct password, fresh TOTP, allowed role, no voice | Allow | Pending |
-| T-02 | Incorrect password | No accepted Keycloak login | Pending |
+| T-01 | TOTP path: correct password, fresh TOTP, allowed role, no face check | Allow | Pending |
+| T-02 | Incorrect password on either path | Keycloak rejects login; no protected access | Pending |
 | T-03 | TOTP path: correct password, missing TOTP | Deny | Pending |
 | T-04 | TOTP path: incorrect TOTP | Deny | Pending |
-| T-05 | Code outside configured valid window | Deny | Pending |
-| T-06 | Reuse previously accepted code | Deny under configured policy; investigate actual behavior | Pending |
-| T-07 | OTP not enrolled | No usable login until required setup/verification | Pending |
-| T-08 | Existing browser SSO / alternate grant | No usable bypass of required factors of selected path | Pending |
-| T-09 | Voice path: correct password, no voice | Protected operation denied | Pending |
-| T-10 | Voice path: nonmatching speaker | Expected deny; document false accept if observed | Pending |
-| T-11 | No valid token / wrong audience or issuer | Deny | Pending |
-| T-12 | Expired/revoked token before action | Deny | Pending |
-| T-13 | Direct resource read by demo OS user | Deny | Pending |
-| T-14 | Arbitrary launcher argument or unauthorized service-account command | Deny | Pending |
-| T-15 | Forged match flag / caller-chosen reference, role or threshold | Deny | Pending |
-| T-16 | Either completed path, regular user asks admin operation | Deny | Pending |
-| T-17 | Either completed path, administrator requests allowed admin operation | Allow | Pending |
-| T-18 | Unapproved enrollment / another account target | Deny | Pending |
-| T-19 | Approved enrollment | Store for trusted subject only; no resource pass | Pending |
-| T-20 | Approved reference replacement | Old version and attempts invalidated | Pending |
-| T-21 | Password or TOTP recovery | Revoke affected sessions; require fresh complete selected login | Pending |
-| T-22 | Previous session pass/new attempt | Deny until fresh checks | Pending |
-| T-23 | Missing model, timeout, malformed verdict | Deny | Pending |
-| T-24 | Invalid audio, unavailable microphone, oversized sample | Deny | Pending |
-| T-25 | Consented replayed voice | Observe, may accept; report limitation | Pending |
-| T-26 | Consented synthetic/imitation attempt (optional) | Observe, no guaranteed detection | Pending |
-| T-27 | Concurrent attempt/reset or interrupted gate | No stale pass; safe cleanup | Pending |
-| T-28 | Repeated wrong attempts across login restarts | Account-level throttle according to policy | Pending |
-| T-29 | Scoped Nmap/traffic/permission check | Only intended lab exposure; no secret leakage | Pending |
-| T-30 | Isolated password-only baseline vs password+TOTP vs password+voice | Measure actual decisions and time | Pending |
+| T-05 | TOTP code outside configured valid window | Deny | Pending |
+| T-06 | Reuse previously accepted TOTP code | Deny if reuse prevention is configured; record actual policy | Pending |
+| T-07 | TOTP not enrolled | No protected access before required enrollment and verification | Pending |
+| T-08 | Existing browser SSO session or alternate login grant | Required factors cannot be bypassed | Pending |
+| T-09 | Face path: correct password, face verification skipped | Protected operation denied | Pending |
+| T-10 | Face path: face belongs to a different person | Expected deny; record any false acceptance | Pending |
+| T-11 | Missing token or incorrect issuer/audience | Deny | Pending |
+| T-12 | Expired or revoked session/token before protected action | Deny | Pending |
+| T-13 | Direct protected resource access by unauthorized OS account | Deny | Pending |
+| T-14 | Unauthorized command, action, or resource request | Deny; resource unchanged | Pending |
+| T-15 | Forged face-match flag or client-chosen identity, role, reference, or threshold | Deny; browser input cannot override trusted verification | Pending |
+| T-16 | Regular User requests an Administrator-only operation after either path | Deny | Pending |
+| T-17 | Administrator requests an allowed operation after either completed path | Allow | Pending |
+| T-18 | Face enrollment without approval or for another account | Deny | Pending |
+| T-19 | Approved face enrollment with one valid face | Store reference for verified user only; enrollment does not grant resource access | Pending |
+| T-20 | Approved face reference replacement | Old reference and pending proofs invalidated | Pending |
+| T-21 | Password reset or TOTP recovery | Revoke affected sessions; require fresh complete authentication | Pending |
+| T-22 | Reuse previous face-verification proof in a new attempt | Deny until fresh verification | Pending |
+| T-23 | Missing Human model, timeout, or malformed verification result | Deny | Pending |
+| T-24 | Camera unavailable, no face, multiple faces, or invalid image | Deny face path; display appropriate error | Pending |
+| T-25 | Consented printed-photo or screen-image presentation | Record actual result and spoofing limitation; do not assume detection | Pending |
+| T-26 | Consented prerecorded-video presentation (optional) | Record actual result; no guaranteed spoofing detection | Pending |
+| T-27 | Concurrent requests, interrupted verification, or session reset | No stale authorization or duplicate protected operation | Pending |
+| T-28 | Repeated incorrect login or face attempts | Enforce configured rate limiting; document actual behavior | Pending |
+| T-29 | Scoped Nmap, traffic, and file-permission checks in Kali lab | Only intended exposure; no credentials or biometric templates leaked | Pending |
+| T-30 | Isolated password-only baseline vs password+TOTP vs password+face | Record actual authorization results and timing; baseline cannot access protected resource | Pending |
+| T-31 | Face path: correct password, matching enrolled face, no TOTP | Allow when trusted verification passes and role permits | Pending |
+| T-32 | Face-path token or proof submitted to TOTP path | Deny | Pending |
+| T-33 | TOTP-path token or proof substituted into face path | Deny | Pending |
+| T-34 | Switch authentication method mid-attempt and reuse old proof | Cancel old attempt; require fresh authentication | Pending |
+| T-35 | Failed TOTP or face verification triggers automatic fallback | No automatic fallback; selected attempt denied | Pending |
+| T-36 | Invalid or manipulated authentication method selection | Deny; no protected operation | Pending |
+| T-37 | Face path with no approved active enrollment | Deny; supervised enrollment required | Pending |
+| T-38 | Face-verified Administrator attempts sensitive factor-change approval without required stronger verification | Deny sensitive approval under configured recovery policy | Pending |
+| T-39 | TOTP login while camera or Human face-verification service is unavailable | Allow if TOTP and role checks succeed independently | Pending |
+| T-40 | Both paths: identity and roles consistent; incorrect client/audience | Correct identity and role accepted only in authorized path; mismatched evidence denied | Pending |
 
-| T-31 | Voice path: correct password, genuine voice, no TOTP | Allow if match passes frozen threshold | Pending |
-| T-32 | Voice-client token presented to TOTP path | Deny | Pending |
-| T-33 | TOTP-client token substituted into voice attempt | Deny | Pending |
-| T-34 | Switch paths after partial login; attempt to reuse token or match | Cancel and restart; old proof denied | Pending |
-| T-35 | Failed OTP or voice attempt triggers automatic alternative | No automatic fallback; deny selected attempt | Pending |
-| T-36 | Invalid or tampered method selection | Deny; no protected action | Pending |
-| T-37 | Voice path with no active approved reference | Deny; supervised enrollment required | Pending |
-| T-38 | Voice-verified admin attempts enrollment approval without TOTP path | Deny sensitive approval | Pending |
-| T-39 | TOTP success while microphone/model unavailable | Allow if role valid; voice not required | Pending |
-| T-40 | Both paths: same subject and role, wrong client/audience | Correct identity on each; substituted token denied | Pending |
+For each completed case, record the date, operator, software versions, actual outcome, Pass/Fail status, and sanitized evidence reference.
 
-For each completed case record date, operator, versions, sanitized evidence reference, observed outcome, pass/fail and linked bug. For biometric evaluation record genuine/impostor trial counts and threshold fixed before evaluation; never turn expected results into actual ones. Use anonymized labels only. Delete private audio according to consent and retention policy.
+For face-verification evaluation, record genuine and impostor trial counts, the Human model version, and the matching threshold used. Do not present expected results as actual test results.
+
+All tests remain Pending until executed and verified.
