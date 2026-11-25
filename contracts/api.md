@@ -1,279 +1,157 @@
-# Voice Verification Project — Shared Integration Contract (Draft v0.1)
+Yousef Taha
+yr5hg
+Idle
+﻿
+Anas — 6:28 PM
+Apply the Kali flexible 2FA redesign
+This update was prepared against main commit 923d3fe5203586a7e322bf42b82b277cd4b8f8d1 of yr5hg/Voice-Verification-Security-System (25 November 2026). GitHub read succeeded, but the write integration returned HTTP 403 when creating a branch. Nothing was changed remotely. The old feature branches feature/protected-backend and feature/speaker-verification were not modified. Review before merging.
 
-**Date:** 23 November 2026  
-**Status:** Proposed team agreement; not evidence of implemented features.  
-**Put this file in:** `contracts/api.md` in the team's private GitHub repository.  
-**Scope:** Three decisions to freeze before parallel development: (1) API endpoints and response shapes, (2) audio format and preprocessing, (3) exact Keycloak role names and access rules.
+Apply in Windows PowerShell (Git installed)
 
-> **Project basis:** Phase 1 describes Keycloak username/password login, a separate Python SpeechBrain ECAPA-TDNN speaker verification service, server-side binding of the voice result to the authenticated user/session, RBAC, controlled voice enrollment/recovery, and tests involving replayed recordings. The URLs, names, formats, endpoints, and limits below are **proposed implementation choices** to agree on; they are not already fixed by Phase 1.
+MIGRATION (1).md
+4 KB
+Expected vs observed test matrix (not yet executed)
+ID	Case	Expected	Observed
+T-01	TOTP path: correct password, fresh TOTP, allowed role, no voice	Allow	Pending
+T-02	Incorrect password	No accepted Keycloak login	Pending
 
-## 1. Architecture and team ownership
+test_cases.md
+5 KB
+Kali Linux setup and first milestone
+Proposed steps; not tested on your team's hardware. Confirm instructor permission for external tools, the voice-only Python exception, shell scripts and model download before installing. The standard Kali security tool catalogue does not supply the entire proposed MFA system.
 
-| Component | Owner | Responsibility | Development URL (example) |
-|---|---|---|---|
-| Keycloak | Member 1 | Password login, users, client roles, OIDC settings | `http://localhost:8080` |
-| Frontend | Member 2 | Browser pages, microphone recording, upload to main backend | Served by main backend |
-| Voice service | Member 3 | SpeechBrain comparison and similarity threshold | `http://127.0.0.1:8001` |
-| Main backend | Member 4 | OIDC integration, sessions, server-side voice state, RBAC, recovery | `http://localhost:8000` |
-| Testing | Member 5 | API contract tests, test recordings, security evaluation | Local test runner |
+1. Lab setup (all members)
 
-**Integration rule:** Browser -> Main Backend -> Internal Voice Service. The browser can be redirected to Keycloak for password login, but must **not** call the internal Voice Service or Keycloak administration APIs directly. Use a same-origin frontend and backend for the first prototype.
+KALI_SETUP.md
+3 KB
+Proposed architecture — Kali lab, password + choice of TOTP or voice
+Status: design, not tested. Python restricted to SpeechBrain library and local voice comparison adapter. Keycloak and SpeechBrain are external tools; confirm instructor approval.
 
-### Recommended authentication choice
+sequenceDiagram
 
-- Backend uses **OIDC Authorization Code Flow** with Keycloak (`realm=voice-demo`, `client_id=voice-web` as proposed names).
-- Backend maintains an **HttpOnly session cookie** and stores necessary authentication/voice state on the server. Keycloak's token(s) stay on the backend; do not place them in localStorage.
-- The authenticated user's identity comes from the validated OIDC subject (`sub`), **never** a user ID or role supplied by the frontend.
-- Successful **password login does not grant access to `/api/protected`**. The server must also have a passing voice verification result for the **same active session**.
-- Protect state-changing requests against CSRF. Use HTTPS outside the local demonstration environment.
+architecture.md
+3 KB
+# Detailed Team Responsibilities — Kali Flexible Two-Factor Authentication
 
-## 2. Main backend API contract (Member 4, consumed by Member 2 and Member 5)
+**Draft v0.4 | 25 November 2026 | Phase 2 deadline: 30 November 2026**
 
-**Base URL:** `http://localhost:8000` (local development only)  
-**Authenticated browser requests:** use the session cookie; `fetch` should use same-origin requests.
+## 1. Team distribution
 
-| Method | Path | Input | Success | Access |
-|---|---|---|---|---|
-| `GET` | `/auth/login` | None | `302` redirect to Keycloak | Public |
-| `GET` | `/auth/callback` | OIDC `code`, `state` | `302` redirect to app after validation | OIDC callback |
-| `POST` | `/auth/logout` | CSRF-protected request | `204` | Logged in |
-| `GET` | `/api/me` | None | `200` user/role/voice status JSON | Password-authenticated |
-| `POST` | `/api/voice/enroll` | `multipart/form-data`: `audio` | `201` enrollment JSON | Logged in + active admin enrollment approval |
-| `POST` | `/api/voice/verify` | `multipart/form-data`: `audio` | `200` verification JSON | Password-authenticated + already enrolled |
-| `GET` | `/api/protected` | None | `200` protected JSON | Password + session-bound voice pass; regular or admin |
-| `GET` | `/api/admin` | None | `200` admin JSON | Password + session-bound voice pass + administrator role |
-| `POST` | `/api/admin/users/{user_id}/approve-enrollment` | JSON `{"reason":"initial"}` | `200` approval JSON | Verified administrator, identity check required |
-| `POST` | `/api/admin/users/{user_id}/reset-voice` | JSON `{"reason":"recovery"}` | `200` reset JSON | Verified administrator, recovery evidence required |
-| `GET` | `/health` | None | `200` minimal health response | Local tests; no secrets |
+TEAM_RESPONSIBILITIES (2).md
+20 KB
+# Shared Integration Contract — Kali Flexible Two-Factor Authentication (Draft v0.4)
 
-**Note:** The two administrator enrollment/recovery routes are proposed for this draft. The exact identity-evidence policy is *not yet specified in Phase 1* and must be agreed before implementing either route. For the first demo, approval can be restricted to a supervised test process and recorded in an audit log. A one-time manual bootstrap for the first demo administrator may be necessary; document it instead of creating a public bypass endpoint.
+25 November 2026. The old FastAPI and HTTP voice-service contract is retired. This filename is retained to preserve existing links. These are proposed interfaces, not tested functionality. All computer-side project components run on Kali; Python is permitted exclusively for SpeechBrain voice inference and its minimal local comparison adapter.
 
-### A. Example: `GET /api/me`
+## 1. Trust boundary
 
-Response `200` after password authentication (voice still pending):
+api.md
+10 KB
+# Project Requirements — Password with TOTP or Voice Verification on Kali Linux
 
-```json
-{
-  "user_id": "keycloak-sub-123",
-  "username": "test_user",
-  "roles": ["regular_user"],
-  "voice_enrolled": true,
-  "voice_verified": false
-}
-```
+**Version:** Draft v0.4 (revised 25 November 2026)  
+**Phase:** Information Systems Security — Phase 2, due **30 November 2026** (original repository deadline)  
+**Status:** Proposed requirements, not evidence of implementation.  
+**Companions:** `TEAM_RESPONSIBILITIES.md`, `contracts/api.md`, `docs/KALI_SETUP.md`.
 
-- `roles` come from **validated server-side Keycloak role data**, not browser input.
-- `voice_verified` means successful verification **for the current session**, not that this account passed at some point in the past.
-- For someone without a valid session: `401` with the standard error envelope.
+PROJECT_REQUIREMENTS (1).md
+21 KB
+# Voice Verification Security System — Flexible Two-Factor Authentication on Kali Linux
 
-### B. Example: `POST /api/voice/verify`
+Information Systems Security, Phase 2 — revised plan v0.4, 25 November 2026. Original deadline: 30 November 2026.
 
-Request:
+Every login requires a password and **one second factor chosen by the user: TOTP (Google Authenticator) OR experimental voice speaker verification**. Both methods are supported, but only two factors are required per login. This is flexible 2FA, not mandatory 3FA. Keycloak handles passwords and TOTP; SpeechBrain handles voice. A trusted local gate enforces the chosen path and RBAC before releasing a protected lab resource.
 
-```http
-POST /api/voice/verify
-Content-Type: multipart/form-data
+README.md
+5 KB
+﻿
+# Shared Integration Contract — Kali Flexible Two-Factor Authentication (Draft v0.4)
 
-(audio file field named 'audio')
-```
+25 November 2026. The old FastAPI and HTTP voice-service contract is retired. This filename is retained to preserve existing links. These are proposed interfaces, not tested functionality. All computer-side project components run on Kali; Python is permitted exclusively for SpeechBrain voice inference and its minimal local comparison adapter.
 
-Response `200` for a processed matching attempt:
+## 1. Trust boundary
 
-```json
-{
-  "voice_verified": true,
-  "message": "Voice verification succeeded"
-}
-```
+Unprivileged demo terminal -> restricted trusted gate -> selected Keycloak device login -> TOTP path (password + OTP) OR voice path (password then gate-owned recording and local SpeechBrain) -> gate-owned protected operation. The separate service identity owns configuration, credentials, state, model, reference and resource. Ordinary demo users cannot modify them, run arbitrary privileged commands or directly access the resource. No public voice API, token injection or caller-supplied match flag.
 
-Response `200` for a processed nonmatching attempt:
+## 2. Identity handoff (Omar -> Anas)
 
-```json
-{
-  "voice_verified": false,
-  "message": "Voice verification failed"
-}
-```
-
-A failed comparison is **not** a network/server error: the API processed the attempt successfully but did not verify the speaker. Do not return the detailed numeric score to the browser; retain it in **restricted evaluation logs** for Member 5. Repeated attempts must be rate-limited in the real prototype. A prior passing result must be cleared when starting a new login session, after logout, or after voice reset.
-
-### C. Example: `POST /api/voice/enroll`
-
-Request is a single multipart field named `audio`, under a valid logged-in user session **and** server-side administrator approval for that user. The frontend does not send a target `user_id`.
-
-Response `201`:
-
-```json
-{
-  "voice_enrolled": true,
-  "message": "Voice enrollment completed"
-}
-```
-
-Backend stores the reference audio (or derived speaker representation) with **restricted access**, associated with the Keycloak `sub` and a versioned enrollment record. Any replacement invalidates old enrollment and any previous passing session voice status. **Never commit biometric recordings or embeddings to GitHub.**
-
-### D. Example: protected resources
-
-`GET /api/protected` returns `200` only after password authentication **and** matching voice for the current session. Both `regular_user` and `administrator` can access it.
-
-`GET /api/admin` returns `200` only if the above are true **and** the account has `administrator` role.
-
-### E. Standard error format
-
-Use the same envelope for error responses:
-
-```json
-{
-  "error": {
-    "code": "VOICE_NOT_ENROLLED",
-    "message": "Voice enrollment is required before verification."
-  }
-}
-```
-
-| HTTP status | Situation |
+| Field | Agreement |
 |---|---|
-| `400` | Invalid request / corrupt recording |
-| `401` | No valid authenticated session |
-| `403` | User authenticated but lacks voice verification or sufficient role, or lacks enrollment approval |
-| `409` | Wrong workflow state (e.g. no enrolled reference voice) |
-| `413` | Recording exceeds size limit |
-| `415` | Unsupported uploaded audio type |
-| `429` | Too many verification attempts |
-| `503` | Internal Voice Service unavailable (deny access; do not bypass voice) |
+| Issuer | Fixed TLS realm `voice-demo`, verified lab certificate |
+| TOTP client | `voice-terminal-totp`; dedicated required password + OTP browser flow |
+| Voice client | `voice-terminal-voice`; dedicated required password browser flow, external voice still pending |
+| Flow | Separate confidential OAuth 2.0 Device Authorization Grant clients; test per-client browser overrides on pinned release |
+| Roles | Consistent application roles `regular_user`, `administrator`; proposed realm roles explicitly mapped and scoped for both clients |
+| Identity | Validated issuer + `sub`, identical account across clients; no caller ID |
+| Token | Active, unexpired, correct issuer, expected client (e.g. `client_id` or verified `azp`), audience, subject and trusted roles; exact observed schema agreed before coding |
+| Secrets | Separate restricted client-secret files; no Git or command-line leakage |
 
-## 3. Internal Voice API contract (Member 3, called **only** by Member 4)
+Gate freezes choice (`totp` or `voice`) before requesting a device code from the matching confidential client. It polls according to server interval and expiry, handles pending/slow-down/denied/expired/error. Accept only the token returned from that attempt; never pasted tokens. Disable other grants, SSO cookie shortcuts and alternate authenticators. Keycloak browser owns credentials; gate never collects passwords/OTP. A password-only voice token cannot satisfy TOTP. Active token alone is not proof of OTP: required browser flow, client separation, and observed negative tests are prerequisites. Verify client-specific overrides really apply to device authorization; if not, block integration until a supported non-Python design is agreed.
 
-**Base URL:** `http://127.0.0.1:8001` on the integration machine.  
-**Only endpoint required for first prototype:** `POST /internal/voice/compare`.
+## 3. Recording contract (Sara -> Anas/Yousef)
 
-Input: `multipart/form-data` with **exactly these two audio file fields**:
-
-- `reference_audio`: enrolled voice recording in standardized WAV format.
-- `attempt_audio`: latest recording in standardized WAV format.
-
-Successful response (`200`):
-
-```json
-{
-  "matched": true,
-  "score": 0.82,
-  "threshold": 0.70,
-  "model": "speechbrain/spkrec-ecapa-voxceleb"
-}
-```
-
-**Important:** Example `score` and `threshold` are illustrative only. Member 3 must establish the actual threshold experimentally. `score` is a model similarity value, not an identity guarantee or a percentage of certainty.
-
-The Voice Service does **not** need Keycloak credentials, account IDs, role names, or browser session IDs. Member 4 chooses the reference file for the authenticated user and binds the result to that session **on the backend**.
-
-If processing fails, return a non-`200` error with the standard error envelope; Member 4 should fail closed and never set `voice_verified = true`.
-
-**Network restriction:** listen on loopback for the local demo, or isolate this service on a private Docker network. Never expose it publicly as an unauthenticated endpoint.
-
-## 4. Audio format contract (Members 2, 3, 4, and 5)
-
-### Browser -> Main backend
-
-The browser records microphone audio using the browser's supported `MediaRecorder` format. To avoid browser incompatibilities, the main backend **accepts**:
-
-- `audio/webm` (often Opus): primary expected Chrome/Edge format when available; **or**
-- `audio/wav` / `audio/x-wav` (WAV): allowed for test files or supported recorders.
-
-Use multipart field name **`audio`** at both `/api/voice/enroll` and `/api/voice/verify`. **Do not make Member 2 implement custom WAV/16-kHz encoding** unless browser support makes it necessary.
-
-### Main backend -> Voice service (strict internal standard)
-
-| Parameter | Agreed provisional value |
+| Property | Proposed requirement |
 |---|---|
-| Container / extension | `.wav` |
-| Audio codec | PCM signed 16-bit (PCM S16LE) |
-| Sample rate | **16,000 Hz (16 kHz)** |
-| Channels | **1 (mono)** |
-| Duration | **3–10 seconds** per recording (team-chosen demo rule) |
-| Max uploaded file size | **10 MB** (team-chosen safety limit) |
-| Multipart field names | `reference_audio`, `attempt_audio` |
-| Model | `speechbrain/spkrec-ecapa-voxceleb` |
+| Source | Gate-controlled ALSA microphone; no arbitrary user file in real verification |
+| Container/codec | WAV, PCM signed 16-bit little endian |
+| Rate / channels | 16,000 Hz / mono |
+| Length | 3–10 seconds (default 5) |
+| Max size | 10 MiB; bound recording time before processing |
+| Ownership | Gate-owned temporary directory; unique filenames, no symlinks, permissions 0700/0600 |
+| Errors | Device unavailable, empty/silent/invalid/oversize file or conversion failure => deny/no match |
 
-Member 4 normalizes uploads to 16-kHz mono PCM WAV (for example using FFmpeg) before passing them to Member 3. Member 3 validates the internal audio contract and rejects bad files. Member 5 uses the same standardized input when preparing reproducible tests.
+Use arecord/FFmpeg and ffprobe; do not assume conversion exit code validates duration or content. Gate selects enrolled reference from protected subject mapping and passes both exact validated files. Delete temporary attempts when no longer needed; enrollment data retained only per policy.
 
-Suggested local conversion command for testing:
+## 4. Model contract (Yousef -> Anas)
+
+Use SpeechBrain's pretrained `speechbrain/spkrec-ecapa-voxceleb` via `SpeakerRecognition`. Reuse or adapt Yousef's existing local comparison script, not the old HTTP voice service. The following is the **proposed project CLI** (not an upstream SpeechBrain command); Yousef must implement or align it with the existing script and test it on Kali:
 
 ```bash
-ffmpeg -i input.webm -ac 1 -ar 16000 -c:a pcm_s16le output.wav
+VOICE_MODEL="$VOICE_MODEL" VOICE_MODEL_DIR="$VOICE_MODEL_DIR" \
+  "$VOICE_PYTHON" "$VOICE_CLI" compare "$reference" "$attempt" --threshold "$VOICE_SIMILARITY_THRESHOLD"
 ```
 
-**Why 16 kHz?** It matches the sample-rate expectation of the selected SpeechBrain model. **Why 3–10 seconds?** This is a pragmatic *starting rule for the classroom prototype*, not a published accuracy guarantee. Record in a quiet room; use consenting test speakers. Preprocessing and silence handling should be consistent across enrollment and verification.
+The pinned implementation must return a cosine similarity score (higher means more similar). Confirm score direction against source and observed genuine/impostor samples. Use a single explicit rule, proposed `score > threshold`, with a finite calibrated threshold; do not silently use a library default. No approved threshold until calibration.
 
-**Replay limitation:** A newly uploaded file or microphone capture is not proof of live speech. Member 5 must include a replayed recording test, and the report must state observed vulnerabilities instead of claiming that speaker matching provides liveness detection.
+The voice-only adapter receives trusted normalized files and gate-owned model settings, emits exactly one JSON object to stdout, and sends diagnostics to stderr. No HTTP server, authentication logic, sessions or role handling in Python.
 
-## 5. Exact Keycloak roles and permissions (Members 1 and 4)
+```json
+{"matched":false,"score":0.12,"threshold":0.30,"model":"speechbrain/spkrec-ecapa-voxceleb","status":"ok"}
+```
 
-**Proposed Realm:** `voice-demo`  
-**Proposed OIDC Client ID:** `voice-web`  
-**Define these as application-specific Keycloak *client roles* on `voice-web`:**
+Illustrative values only. Zero exit status means comparison completed, not that the speaker matched. The Bash gate checks process status, strict JSON shape, finite numeric score and threshold in [-1,1], expected model, equality to configured threshold and consistency of the verdict with the agreed rule. Timeout, malformed output, failure, missing threshold or inconsistent fields deny access. Model revision and local cache are pinned in gate-owned configuration. Log restricted similarity metadata only for consented evaluation. No caller-supplied results or arbitrary paths.
 
-- `regular_user` (exact lowercase string)
-- `administrator` (exact lowercase string)
+## 5. Gate actions and outcomes (Anas -> Sara/Hamzeh)
 
-These roles are **not** Keycloak console administration rights (`realm-admin`). Keep the names and case exactly the same in Keycloak, backend code, tests, and documentation. Assign demo users one of these roles; `administrator` implicitly has access to the normal protected area under the application policy.
+Allowlisted operations: `verify-and-view`, `verify-and-admin`, `enroll-own`, and admin enrollment/recovery actions. Logical names only. The gate prompts for `totp` or `voice` before login; admin approval and enrollment operations require the TOTP path. No arbitrary commands or user-chosen reference paths.
 
-| Operation | Unauthenticated | `regular_user` | `administrator` |
-|---|---|---|---|
-| Open login page | Allow | Allow | Allow |
-| `/api/me` after password login | Deny | Allow | Allow |
-| Submit voice verification after password login | Deny | Allow if enrolled | Allow if enrolled |
-| `/api/protected` | Deny | Allow after voice pass | Allow after voice pass |
-| `/api/admin` | Deny | Deny | Allow after voice pass |
-| Approve enrollment / reset voice | Deny | Deny | Allow after voice pass + documented identity check |
-
-**Role transfer agreement:** Member 1 ensures client roles are available to the backend through a properly validated Keycloak OIDC token/role mapper or equivalent trusted server-side lookup. Member 4 checks the roles server-side on **every protected request**. Do not trust a browser `role` field or a hidden button as authorization.
-
-### Proposed developer-only account names
-
-| Username | Client role |
+| State | Outcome |
 |---|---|
-| `test_user` | `regular_user` |
-| `test_admin` | `administrator` |
+| Invalid/missing token or wrong expected client | Deny |
+| TOTP path, token from proven required password+OTP flow, authorized role | Allow defined resource action; no voice required |
+| Voice path, password token but no current trusted voice pass | Deny protected operation |
+| Voice path, valid token, current subject's fresh match and active enrollment, allowed role | Allow defined resource action |
+| Either completed path, regular user requests admin operation | Deny |
+| Either completed path, administrator role | Allow defined ordinary admin resource operation |
+| TOTP path + appropriate approval/identity evidence | Allow defined enrollment/recovery action only |
+| Any selected factor fails, invalid role, expiry or malformed result | Deny; never silently switch |
 
-Use dummy passwords; never place them in git. Keycloak itself owns user credentials.
+Attempt state: unique gate-generated ID, immutable selected method, expected client, issuer+subject, active token context, action, created/expiry timestamp, retry count, and voice-only enrollment version and trusted verdict. Gate derives TOTP success only from its proven dedicated flow, not user input. Revalidate token/role/client and method-specific state immediately before dispatch; lock/recheck voice enrollment version. Clear all state on completion, cancellation, logout, timeout, interruption or revocation. Changing methods cancels the old attempt and starts fresh password authentication. Account-level throttling across both paths; proposed max three voice attempts and five-minute overall expiry. Local outcomes: `AUTH_DENIED`, `METHOD_INVALID`, `VOICE_REQUIRED`, `VOICE_MISMATCH`, `ROLE_DENIED`, `ENROLLMENT_REQUIRED`, `ERROR`, `ALLOWED`. Not HTTP statuses; a printed message is not an access grant.
 
-## 6. Parallel handoff checklist
+## 6. Recovery and storage
 
-| Member | Can start immediately with | Must hand off |
-|---|---|---|
-| 1 — Keycloak | Docker, realm, client and test users | Realm/client names, roles, redirect URI and exportable non-secret config |
-| 2 — Frontend | Static pages and mocked `/api/me`, `/api/voice/verify` | Multipart `audio` upload, page states and recording behavior |
-| 3 — Voice AI | Two local standardized WAV files | Working `POST /internal/voice/compare`, threshold config and sample outputs |
-| 4 — Backend | Mock role data and mocked Voice API response | Real routes, server-side session binding, integration, recovery flow |
-| 5 — Testing | Contract and volunteer voice samples | Positive/negative tests, replay findings, real screenshots and result tables |
+Approvals are account-specific, action-specific, expiring, single-use and created by administrator authenticated through password+TOTP after supervised identity evidence. Enrollment/replacement never directly creates a voice-pass. First administrator bootstrap is documented, supervised and offline; no public bypass. Replacement increments version, invalidates old reference/attempts and forces new enrollment; password/TOTP reset uses Keycloak and revokes sessions. Use protected files/atomic operations/locking or approved local storage; retention and audit details agreed before use. Audit includes pseudonymous actor/target, time, action and outcome only.
 
-### Minimum integration acceptance tests
+## 7. Freeze and acceptance checklist
 
-1. Wrong Keycloak password -> no usable authenticated session.
-2. Correct password but voice not verified -> `/api/protected` and `/api/admin` denied.
-3. `regular_user` with matching voice -> `/api/protected` allowed; `/api/admin` denied.
-4. `administrator` with matching voice -> both resources allowed.
-5. Nonmatching voice -> protected endpoints denied.
-6. Voice Service unavailable -> access denied, never automatically granted.
-7. New login session, logout, or voice replacement -> no reuse of old voice-pass state.
-8. Enrollment without administrator approval -> denied.
-9. Replay recording -> run experiment and **record observed outcome**; do not assume it will fail.
-10. Password reset -> role and voice enrollment remain intact; unauthorized voice replacement is denied.
+- Omar: actual device-flow behavior, both dedicated clients, enforced password on both and OTP on TOTP path, introspection schema and role test evidence.
+- Sara: audio format and recording/error behavior demonstrated on Kali.
+- Yousef: version and model checksum, verified score output and parser, frozen threshold.
+- Anas: actual restricted resource, safe launch permissions and gate validation/error/cleanup.
+- Hamzeh: test exact boundary, bypasses, token/role/voice failures and actual replay outcomes.
 
-### Decisions still open (resolve before final implementation)
+Until all are demonstrated, this contract remains proposed. If external tools/shell are not permitted, escalate scope rather than implementing an unsupported claim.
 
-- Final threshold and validation procedure (Member 3 + Member 5).
-- Exact identity evidence and approval procedure for initial enrollment / voice replacement (Member 4 + team).
-- Actual Keycloak and SpeechBrain versions, model revision, and audio/test environment for the Phase 2 report.
-- Where to store sensitive reference audio and session state (recommended: access-restricted local storage + a small server-side database for the demo).
-- Whether the administrator bootstrap requires a supervised local initialization process.
-
-**Security and scope note:** This is an *academic voice verification experiment*. A similarity score does not prove live presence; replay/deepfake resistance is not implied. The Phase 1 report explicitly does not claim NIST-compliant voice biometric authentication or production readiness.
-
-## Official technical references
-
-- Keycloak OIDC: https://www.keycloak.org/securing-apps/oidc-layers
-- Keycloak administration: https://www.keycloak.org/docs/latest/server_admin/
-- FastAPI uploads: https://fastapi.tiangolo.com/tutorial/request-files/
-- SpeechBrain pretrained ECAPA-TDNN: https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb
+References: [Keycloak OIDC](https://www.keycloak.org/securing-apps/oidc-layers), [Keycloak admin guide](https://www.keycloak.org/docs/latest/server_admin/), [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628), [SpeechBrain speaker API](https://speechbrain.readthedocs.io/en/latest/API/speechbrain.inference.speaker.html), [ECAPA-TDNN model](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb).
+api.md
+10 KB
