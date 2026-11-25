@@ -1,29 +1,67 @@
-# Secrets
+
+# Local configuration and credentials
 .env
 .env.*
 !.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.secret
+secrets/
+private/
 
-# Python
-.venv/
-venv/
-__pycache__/
-.pytest_cache/
-*.pyc
+# Node.js dependencies and generated files
+node_modules/
+.npm/
+.cache/
+dist/
+build/
+coverage/
+.nyc_output/
+*.log
 
-# Voice recordings
+# Downloaded face models and local application state
+models/
+pretrained_models/
+data/
+lab-state/
+captures/
+templates/
+private-evidence/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+
+# Private camera captures and recordings
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.bmp
+*.webm
+*.mp4
+*.mov
 *.wav
 *.mp3
 *.flac
-*.webm
 *.ogg
 
-# Pretrained models
-pretrained_models/
-voice-service/models/
+# Only reviewed, non-sensitive images belong in these public folders
+!docs/figures/*.jpg
+!docs/figures/*.jpeg
+!docs/figures/*.png
+!docs/figures/*.webp
+!frontend/assets/*.jpg
+!frontend/assets/*.jpeg
+!frontend/assets/*.png
+!frontend/assets/*.webp
 
-# Local data
-data/
-
-# IDE and OS
+# Editor and operating-system files
 .vscode/
+.idea/
 .DS_Store
+Thumbs.db
