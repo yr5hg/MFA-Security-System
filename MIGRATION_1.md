@@ -1,42 +1,86 @@
-# Apply the Kali flexible 2FA redesign
 
-This update was prepared against `main` commit `923d3fe5203586a7e322bf42b82b277cd4b8f8d1` of `yr5hg/Voice-Verification-Security-System` (25 November 2026). GitHub read succeeded, but the write integration returned HTTP 403 when creating a branch. Nothing was changed remotely. The old feature branches `feature/protected-backend` and `feature/speaker-verification` were not modified. Review before merging.
+# Apply the Face Verification and TOTP Redesign
+
+This documentation update was prepared against `main` commit `dfcea59dccaf6ca18577d80bba4ff284d027872f` of [yr5hg/Voice-Verification-Security-System](https://github.com/yr5hg/Voice-Verification-Security-System) on 25 November 2026.
+
+The previous migration used commit `923d3fe5203586a7e322bf42b82b277cd4b8f8d1`. The inspected repository baseline is newer.
+
+No remote branch, commit or pull request was changed during preparation. Preserve existing code, feature branches, repository history and directory placeholders.
 
 ## Apply in Windows PowerShell (Git installed)
 
-From your local repository root, first check `git status`. Commit/stash existing work safely; do not overwrite uncommitted changes. Fetch and switch to main; verify the baseline hash. If main advanced, review changes and resolve manually instead of blindly overwriting.
+From the local repository root, ensure existing work is committed or safely stashed before starting.
 
 ```powershell
+git status
 git fetch origin
 git switch main
 git pull --ff-only origin main
 git rev-parse HEAD
-git switch -c redesign/kali-flexible-2fa
 ```
 
-Extract the zip contents directly into repository root, replacing the six existing content files. For example, replace the zip path with the actual download location:
+Compare the current commit with the inspected baseline. If `main` has advanced, review newer changes before replacing files.
+
+Create a documentation branch:
 
 ```powershell
-Expand-Archive -LiteralPath "$HOME\Downloads\kali-flexible-2fa-repository-update.zip" -DestinationPath . -Force
+git switch -c redesign/face-totp-docs
 ```
 
-If applying to original main, remove only the empty old placeholders (all were verified on main), replaced by real documentation and the revised folders:
+## Apply the Documentation Update
+
+Extract the update package outside the repository.
+
+Use the [Copy to GitHub Guide](COPY_TO_GITHUB_GUIDE.md) and [File Mapping](FILE_MAPPING.md) to replace the ten existing populated files and add the six new documentation files.
+
+- Keep setup, architecture, migration and test documents at the repository root.
+- Keep the integration contract under `contracts/`.
+- Preserve existing empty directories, placeholders and implementation code.
+- Copy only the mapped files, not the archive's parent folder.
+- Do not overwrite newer work from another team member.
+
+## Review and Commit
+
+After applying the files, inspect the changes:
 
 ```powershell
-git rm -- backend/.gitkeep frontend/.gitkeep frontend/js/.gitkeep keycloak/.gitkeep voice-service/.gitkeep tests/.gitkeep docs/phase2/.gitkeep
 git status --short
-git add -- README.md PROJECT_REQUIREMENTS.md TEAM_RESPONSIBILITIES.md .env.example .gitignore contracts/api.md keycloak/ voice-recording/ voice-service/ access-control/ tests/ docs/ MIGRATION.md
+git diff --stat
+git diff --check
+```
+
+Once the working tree contains only the intended changes, stage and review them:
+
+```powershell
+git add -A
 git diff --cached --stat
 git diff --cached --check
 git diff --cached --name-only
-git commit -m "Support password plus chosen TOTP or SpeechBrain voice verification on Kali"
-git push -u origin redesign/kali-flexible-2fa
 ```
 
-If you already applied the earlier 3FA package, start from your clean updated branch instead, create `redesign/kali-flexible-2fa`, extract over the existing documentation, skip the `git rm` command if placeholders were already removed, and review changes before committing. Do not overwrite teammates’ implementation work.
+Confirm that no secrets, biometric data or unrelated code are staged.
 
-Open the resulting PR to main, review with team, and merge when approved. Do not merge obsolete backend or HTTP-service branches wholesale; create new feature branches after the new baseline is accepted. Yousef may review and selectively reuse the existing local Python voice comparison code only. If the zip is extracted with a parent folder by another archive tool, copy the contents, not the parent folder.
+```powershell
+git commit -m "Update documentation for TOTP and Human face verification"
+git push -u origin redesign/face-totp-docs
+```
 
-## Scope and limits
+Open a pull request to `main` and use the [Review Checklist](REVIEW_CHECKLIST.md) before merging.
 
-All six nonempty main files were rewritten. Seven `.gitkeep` placeholders are retired; new component READMEs, setup, architecture, test matrix and migration guide replace them. No new executable project code or dependency lockfile is provided; this is the revised specification and implementation plan, not a completed MFA application. SpeechBrain installation on Kali, the local comparison adapter, two client-specific device flows, tool approval and restricted gate remain feasibility checks. The assignment keeps Omar on Keycloak/TOTP, Yousef on voice, Sara on capture, Hamzeh on testing, and assumes Anas is the requester taking integration. Confirm if that assumption is incorrect. Do not delete old history or branches.
+## Scope and Limits
+
+This migration replaces experimental SpeechBrain voice verification with face verification using the Human JavaScript library.
+
+Every ordinary login requires a fresh Keycloak password authentication followed by one selected second factor: **TOTP or experimental Face Verification**.
+
+The updated design uses browser camera capture, private Node.js face comparison, trusted session handling and role-based access control. All computer-side components run on Kali Linux without Python.
+
+The five team members retain their assigned responsibilities. See [Team Responsibilities](TEAM_RESPONSIBILITIES.md) for individual tasks and integration milestones.
+
+This package updates documentation and implementation plans. It does not provide a completed or tested authentication application.
+
+The reported Kali webcam and Human browser demonstration is an initial proof of concept. Keycloak integration, server-side face matching, protected operations and security testing still require implementation and verification.
+
+Record actual progress in [Implementation Status](IMPLEMENTATION_STATUS.md). Do not commit credentials, OTP secrets, facial images or biometric templates.
+
+**Phase 2 deadline:** 30 November 2026.
