@@ -1,186 +1,192 @@
-# Project Requirements — Password with TOTP or Voice Verification on Kali Linux
 
-**Version:** Draft v0.4 (revised 25 November 2026)  
-**Phase:** Information Systems Security — Phase 2, due **30 November 2026** (original repository deadline)  
-**Status:** Proposed requirements, not evidence of implementation.  
-**Companions:** `TEAM_RESPONSIBILITIES.md`, `contracts/api.md`, `docs/KALI_SETUP.md`.
+# Project Requirements — Password with TOTP or Face Verification on Kali Linux
+
+**Version:** Draft v0.5 (revised 25 November 2026)  
+**Phase:** Information Systems Security — Phase 2, due **30 November 2026**  
+**Status:** Proposed requirements, not evidence of complete implementation.  
+**Companions:** [TEAM_RESPONSIBILITIES.md](TEAM_RESPONSIBILITIES.md), [api.md](contracts/api.md), [architecture.md](docs/architecture.md), [test_cases.md](test_cases.md).
 
 ## 1. Project overview
 
-Implement a small Kali Linux lab account system with mandatory password and user-selected TOTP or experimental speaker verification. Knowledge is always required; possession or experimental inherence is the second factor. The user selects the method in the terminal before starting a fresh Keycloak login. Keycloak verifies passwords and, on the TOTP path, verifies the Google Authenticator code. On the voice path, the trusted gate requires a fresh SpeechBrain comparison against the authenticated account's approved reference. Both paths enforce RBAC and least privilege. The minimum demonstration is terminal-based, with browser only for Keycloak login.
+Implement a small Kali Linux laboratory account system with mandatory password authentication and one user-selected second factor: TOTP or experimental face verification. Knowledge is always required; possession or experimental inherence is the second factor. The user selects the method before a fresh Keycloak password login. Keycloak verifies the password on both paths and the authenticator code on the TOTP path. On the face path, a trusted Kali Node.js component running Human compares a fresh webcam capture against the authenticated account's approved reference. Only the protected application can release a resource after checking the completed selected path and application role.
 
-This supersedes the mandatory three-factor design. Python is allowed only for SpeechBrain, its inference dependencies and minimal local comparison adapter. All other components use existing Kali/Linux tools, configuration and Bash. Keycloak and SpeechBrain are external software; instructor permission is required. No custom web stack, model training or C++ alternative.
+All computer-side components, model assets and application state reside within the Kali VirtualBox guest. An authenticator application runs on a separate device. The application uses JavaScript/Node.js and Keycloak configuration, without Python. The expected result is an experimental demonstration with access-control evidence, biometric test observations and a security review.
 
-**Security boundary:** speaker matching is experimental, not proof of liveness or NIST SP 800-63B-4-compliant authentication. Password+TOTP is conventional 2FA; password+voice is an experimental alternative. A selectable system is only as resistant as its weakest enabled route; do not claim it is stronger than requiring both. TOTP is susceptible to phishing and code theft.
+**Security boundary:** Face comparison is not certified liveness or guaranteed presentation-attack resistance. A browser-reported match never authorizes an operation; the server owns the reference, matching policy and final decision. A flexible authentication system can be attacked through its weaker enabled path, and TOTP is also susceptible to phishing and stolen codes.
 
 ## 2. Scope
 
 | In scope | Out of scope |
 |---|---|
-| Kali, Keycloak, Google Authenticator, SpeechBrain voice-only Python adapter, Bash gate | Python outside model inference, FastAPI, custom HTTP services |
-| Password AND (TOTP OR voice); separate trusted paths, RBAC | Mandatory 3FA, facial recognition, speech-to-text, training |
-| Admin-approved enrollment, supervised factor reset and recovery | Public registration, unsupervised recovery or public deployment |
-| Protected resource and repeatable comparison of both paths | Guaranteed anti-spoof/liveness, standards certification |
+| Kali Linux, VirtualBox, Keycloak, an authenticator app, Human and a local Node.js service | Python-based biometric adapters, third-party cloud services and unrelated modalities |
+| Password AND (TOTP OR face); trusted session binding, role-based access control | Mandatory 3FA, face identification across users and unrelated account services |
+| Browser camera capture, supervised enrollment, replacement, factor recovery | Public registration, unsupervised factor changes and internet-facing deployment |
+| Protected operations, genuine/impostor comparisons and authorized Kali security tests | Guaranteed anti-spoofing or certified biometric authentication |
 
 ## 3. Components and ownership
 
 | Component | Owner | Proposed technology |
 |---|---|---|
-| Identity and both login paths | Omar Aljaouni | Keycloak, Google Authenticator, Java runtime or approved container, curl/jq |
-| Recording and enrollment interaction | Sara Alqadi | ALSA `arecord`, FFmpeg/ffprobe, Bash |
-| Voice comparison | Yousef Taha | SpeechBrain, pretrained ECAPA-TDNN, PyTorch, minimal local Python adapter |
-| Integration, protected resource and recovery | Anas Musa | restricted Bash gate, curl/jq, OS accounts/permissions, Keycloak device flow and introspection |
-| Evaluation | Hamzeh Abu Jumaa | Kali, Nmap, Wireshark, curl, shell tools, consented recordings |
+| Identity and both authentication paths | Omar Aljaouni | Keycloak, authenticator application, configured OIDC clients and roles |
+| Camera capture and enrollment interaction | Sara Alqadi | Browser webcam, HTML/CSS and JavaScript in `frontend/` |
+| Face recognition and comparison | Yousef Taha | Human models and a private local Node.js verifier under `backend/` |
+| Integration, protected operations and recovery enforcement | Anas Musa | Trusted Node.js gate, server-side sessions, protected storage and RBAC |
+| Independent evaluation and reporting | Hamzeh Abu Jumaa | Kali testing utilities, consented facial trials and `test_cases.md` |
 
-All server-side project components run on Kali. Google Authenticator runs on a separate phone. Use a dedicated lab realm/client, distinct service and unprivileged operator/demo accounts, and a protected resource that is not directly readable by the user. All owners must contribute implementation, tests and report evidence.
+All server-side project components run inside Kali; TOTP codes are generated on a separate device. The ordinary demo account cannot directly access the private biometric store or protected resource. Every member contributes implementation evidence, testing and reporting. Detailed tasks and FR/NFR ownership are listed in [TEAM_RESPONSIBILITIES.md](TEAM_RESPONSIBILITIES.md).
 
 ## 4. Actors and permissions
 
-Realm `voice-demo`; proposed confidential clients `voice-terminal-totp` and `voice-terminal-voice`. Application roles `regular_user` and `administrator` are consistent across both clients (realm roles or explicitly mapped client roles; proposed realm roles, restricted to the application). These do not grant Keycloak console administration. Identity is validated issuer + `sub`, never caller input.
+Application roles are `regular_user` and `administrator`. Neither role grants Keycloak administration privileges. The trusted identity is the validated issuer and subject, never a username or role supplied by the browser. Both application roles may select either method for ordinary access.
 
 | Operation | Visitor | Regular user | Administrator |
 |---|---|---|---|
-| Select method and start login | Yes | Yes | Yes |
-| Record own verification attempt | No | Voice path, after password | Same |
-| Enroll own reference | No | Password + TOTP and active admin approval | Same |
-| Read protected lab resource | No | Password + chosen second factor | Same |
-| Execute defined admin-only operation | No | No | Password + chosen second factor + role |
-| Approve enrollment/replacement | No | No | Password + TOTP, administrator role, supervised identity evidence |
+| Choose method and start login | Yes | Yes | Yes |
+| Provide own verification frame | No | Face path after fresh password | Same |
+| Read the protected resource | No | Completed selected authentication path | Same |
+| Execute the defined administrator operation | No | Deny | Completed selected path and administrator role |
+| Approve a named account's enrollment/replacement | No | Deny | Fresh password + TOTP and supervised identity check |
+| Enroll or replace own face | No | Own password + TOTP, consent and matching approval | Same |
 
-Both roles may choose either factor for normal access. Sensitive enrollment approval and recovery are separately restricted to the TOTP path and supervised identity checks, to prevent a weak or replaced voice from authorizing factor changes. This is a proposed enrollment safeguard, not mandatory 3FA for normal access. First-admin bootstrap is supervised offline. TOTP reset uses authorized Keycloak procedures with identity checks and session revocation.
+An independent supervisor handles initial administrator setup and prevents self-approval where it would bypass enrollment controls. Loss of both factors requires supervised identity-provider recovery. Enrollment, replacement and recovery do not themselves authorize a protected operation.
 
 ## 5. Functional requirements
 
-Preserve original FR IDs where possible; TOTP and method-selection requirements are FR-27–FR-32. Every requirement needs actual acceptance evidence.
+Preserve the established requirement identifiers: FR-01 through FR-32. Each requirement needs observed acceptance evidence before it may be considered implemented. Acceptance evidence must be collected from executed laboratory tests.
 
 ### 5.1 Account identity and login
 
-| ID | Requirement | Acceptance evidence |
+| ID | Requirement | Verification |
 |---|---|---|
-| FR-01 | Create designated demonstration accounts in Keycloak. | Two distinct account subjects and assigned roles. |
-| FR-02 | Enforce configured password policy and brute-force protection. | Weak password rejected; rate/lockout settings demonstrated safely. |
-| FR-03 | Authenticate correct password through the supported Keycloak browser flow used by the dedicated client. | Wrong password cannot produce an accepted login. |
-| FR-04 | Obtain trusted identity and client roles from validated Keycloak data. | Caller-supplied IDs/roles cannot influence authorization. |
-| FR-05 | End gate attempt on logout, expiry or completion; no reusable voice-pass flag. | New operation requires fresh authentication; expired/revoked tokens denied. |
-| FR-27 | Configure required TOTP on the TOTP client; enroll eligible demo users using Google Authenticator on a separate device. | Enrollment documented without exposing seed or QR; correct fresh code works. |
-| FR-28 | Block missing, incorrect, expired and reused TOTP on the TOTP path; prove password-only tokens cannot satisfy that path. | Negative tests including existing browser SSO, unconfigured OTP, and direct grant. Record actual replay/window behavior; resolve bypass before acceptance. |
-| FR-29 | TOTP reset requires supervised identity verification, invalidates affected sessions, and preserves role and voice requirements. | Recovery audit; new OTP enrollment required for TOTP access; no silent downgrade or reused state. |
+| FR-01 | Create separate demonstration accounts and assign application roles in Keycloak. | The two accounts have distinct subjects and the role map gives only the intended privileges. |
+| FR-02 | Enforce the realm password policy and brute-force protection. | A weak password fails policy and the configured retry limit takes effect on a disposable account. |
+| FR-03 | Require a fresh username/password login for either selected route. | A correct password identifies the enabled account. Wrong, missing or disabled-account credentials produce no accepted identity. |
+| FR-04 | Map the verified issuer, subject and application roles consistently on both clients. | The same account resolves to the same issuer/subject pair. Only mapped application roles can affect access. |
+| FR-05 | End a local attempt on completion, cancellation, logout, expiry or invalidation. | A second dispatch or a return after logout requires a new login. |
+| FR-27 | Enroll eligible accounts in Keycloak TOTP using a separate authenticator device. | Supervised setup, with private QR/seed handling, is followed by a distinct fresh login with a valid code. |
+| FR-28 | Reject absent, wrong, expired and reused TOTP on the TOTP route. | The chosen policy disables code reuse. No accepted OTP proof on a skipped, stale or first-time setup-only flow. |
+| FR-29 | Recover a lost TOTP credential through supervised identity verification and revoke affected sessions. | Old credential and local attempts fail. Roles and face enrollment persist. The replacement must pass fresh verification. |
+| FR-30 | Offer both methods before login and freeze the choice with its client and action. | Invalid choices fail. An explicit switch cancels the attempt and starts a new password login. |
+| FR-31 | Configure distinct confidential clients and verifiable authentication evidence for each route. | The signed identity proof identifies the expected client and executed factors. A face-client password proof cannot satisfy TOTP. |
+| FR-32 | Require an already active, approved enrollment for the factor used in ordinary access. | An ineligible or unenrolled account cannot use setup as a resource grant. TOTP remains usable without a camera. |
 
-| FR-30 | Let user select TOTP or voice before starting a login; bind method to attempt and expected client. | Both methods available; unknown choice denied; switching cancels old attempt and requires fresh password. |
-| FR-31 | Separate trusted client flows; verify token client, audience and issuer, with consistent roles. | Voice-client token cannot satisfy TOTP path; unrelated token or caller-supplied method/flag denied. |
-| FR-32 | Require approved prior voice enrollment and existing verified OTP for normal use of respective methods; factor setup is not a resource authorization. | Unenrolled method denied, no automatic fallback; supervised enrollment via TOTP path and admin approval. |
+### 5.2 Face enrollment, capture and verification
 
-### 5.2 Voice enrollment and speaker verification
-
-| ID | Requirement | Acceptance evidence |
+| ID | Requirement | Verification |
 |---|---|---|
-| FR-06 | Record a fresh microphone clip on the trusted Kali host, normally 3–10 seconds. | Microphone success and device/error handling. |
-| FR-07 | Require short-lived administrator approval for initial voice enrollment after identity check. | Unapproved enrollment denied; approval single-use. |
-| FR-08 | Associate the reference with the validated account subject. | Another user's reference cannot be selected by the caller. |
-| FR-09 | Validate and normalize audio to signed 16-bit PCM WAV, 16 kHz mono; impose duration and size limits. | Format inspection and malformed/oversized input rejected. |
-| FR-10 | Use SpeechBrain with pretrained ECAPA-TDNN weights for 1:1 comparison. | Known genuine and impostor clips produce documented similarity scores and decisions using only the voice-specific Python adapter. |
-| FR-11 | Select and document a threshold after calibration; freeze it before evaluation. | Disjoint calibration/evaluation attempts, chosen threshold, engine version and score direction recorded. |
-| FR-12 | Bind voice pass to current attempt, validated subject, token/session and enrollment version. | Another account/session/old enrollment cannot reuse a pass. |
-| FR-13 | Deny missing/mismatched/error/timeout results on the selected voice path; no automatic fallback. | No protected access on failed recording, corrupt model, unexpected output or voice mismatch. |
+| FR-06 | Capture a new webcam frame in the Kali browser for the requested face operation. | The user sees a preview and can cancel. Denied permission or a missing device produces a recoverable message and no successful capture. |
+| FR-07 | Require supervised identity checking and short-lived single-use administrator approval for initial face enrollment. | Only the approved subject can enroll with a fresh password and TOTP before the approval expires. |
+| FR-08 | Bind the reference to the authenticated issuer and subject on the server. | Selecting a different user name or account identifier in browser input cannot change ownership. |
+| FR-09 | Produce bounded JPEG capture input and guide the user to present exactly one well-positioned face. | The capture view guides a retry for poor input. The server independently rejects out-of-policy bytes, dimensions, face count and quality before storage or matching. |
+| FR-10 | Run Human on Kali in a trusted Node component for detection, descriptor extraction and 1:1 comparison. | The server detects one acceptable face, extracts a finite descriptor and compares with exactly the authenticated subject's active reference. |
+| FR-11 | Calibrate and freeze the model, quality policy and similarity threshold before evaluation. | A versioned policy gives the score direction, scale and equality rule. A missing threshold blocks face verification. |
+| FR-12 | Bind face evidence to the active browser session, attempt, method, subject, identity context, action and reference version. | A result for an earlier attempt, another subject or a replaced template cannot authorize dispatch. |
+| FR-13 | Return a typed failure on a mismatch, unusable face, model error or timeout. | A failed or malformed verifier result never satisfies the face route. Anas enforces access denial with no automatic method change. |
 
 ### 5.3 Protected access and recovery
 
-| ID | Requirement | Acceptance evidence |
+| ID | Requirement | Verification |
 |---|---|---|
-| FR-14 | Require password AND (successfully verified TOTP OR successfully verified voice) for protected access, according to the selected path. | Both complete paths succeed; password alone, TOTP alone and voice alone denied. |
-| FR-15 | Require the `administrator` role in addition to a complete selected 2FA path for admin operation. | Regular user denied; authorized admin allowed. |
-| FR-16 | Enforce checks in a trusted gate; directly accessing protected data, modifying client inputs or invoking arbitrary commands cannot bypass it. | OS permission tests; direct access and role-tampering tests. |
-| FR-17 | Password reset preserves roles and reference; revokes relevant sessions and requires a fresh complete selected path for new access. | Old attempt denied; new 2FA required. |
-| FR-18 | Voice replacement needs verified administrator identity check and explicit approval. | Unauthorized replacement denied. |
-| FR-19 | Replacement invalidates prior reference version and outstanding voice states. | Old reference/version cannot unlock access. |
-| FR-20 | Log non-sensitive audit events for login outcomes, enrollment and recovery. | Action, pseudonymous account, actor, time and outcome; no secrets/audio. |
+| FR-14 | Perform the requested protected operation only after password and its one selected second factor. | Each complete route independently succeeds for an allowed role. An isolated factor or partial login cannot release a resource. |
+| FR-15 | Restrict the ordinary administrator operation to the administrator application role after either complete route. | A regular user receives denial on both routes. An administrator may perform the defined operation on either. |
+| FR-16 | Enforce allowlisted operations at the local server and isolate the underlying resource from the demo OS user. | Only the service identity can dispatch the operation. Browser claims, arbitrary operations and direct file access cannot grant it. |
+| FR-17 | Use supervised Keycloak password recovery, preserve roles and the enrolled face reference, and invalidate affected sessions. | Pre-reset attempts fail and the account completes a fresh selected login after reset. |
+| FR-18 | Require supervised, target-bound administrator approval and owner password plus TOTP to replace a face reference. | Only an unexpired approval for this subject, purpose and version can authorize replacement. |
+| FR-19 | Atomically replace the reference and invalidate evidence for the old version. | Redemption succeeds at most once. Concurrent verification cannot dispatch after replacement on stale evidence. |
+| FR-20 | Record sanitized events for authentication, authorization, factor changes and recovery. | A reviewer can reconstruct actor, target, time, action and outcome with opaque identifiers and no recoverable credentials or biometric content. |
 
 ### 5.4 Evaluation and reporting
 
-| ID | Requirement | Acceptance evidence |
+| ID | Requirement | Verification |
 |---|---|---|
-| FR-21 | Test consenting genuine and impostor speakers. | Actual counts and observations. |
-| FR-22 | Test replay of a consenting enrolled speaker; optional consented synthetic/imitation clip. | Record acceptance or rejection, not guaranteed detection. |
-| FR-23 | Test password, TOTP, voice, role, recovery and bypass failure cases. | Expected versus observed matrix. |
-| FR-24 | Report FAR/FRR and threshold methodology with denominators and sample-size limits. | Actual confusion counts, threshold and timing. |
-| FR-25 | Inspect authorized lab-exposed services and protected access using Kali tools. | Scoped Nmap, Wireshark, curl and local permission evidence as appropriate. |
-| FR-26 | Compare isolated password-only baseline, password+TOTP and password+voice using measured lab outcomes and response times. | Labeled baseline results, analysis and limitations; no fabricated results. |
+| FR-21 | Evaluate genuine users and different consenting people against the claimed account. | Record separate held-out trial counts and observed decisions under the frozen policy. |
+| FR-22 | Evaluate presentations of consented prints, on-screen images and, where feasible, recorded video. | Record the medium and actual acceptance or rejection separately from ordinary impostor trials. Mark an unavailable medium with a reason. |
+| FR-23 | Execute the two-path functional, recovery and denial matrix and retain sanitized evidence. | Every reported result identifies its setup, actual outcome, operator and evidence. Unrun cases are visibly pending. |
+| FR-24 | Report error rates, threshold methodology, scope and uncertainty of the lab sample. | Report false accepts/impostor trials and false rejects/genuine trials with counts. Empty denominators are reported as unavailable. |
+| FR-25 | Inspect service exposure, transport configuration and permissions in the assigned VM. | Compare observed listeners and protected-resource permissions to the intended deployment and explain discrepancies. |
+| FR-26 | Compare an isolated password-only baseline to the two integrated routes. | Use the same operation, lab hardware and timing boundaries. No baseline endpoint or switch exists in the integrated gate. |
 
 ## 6. Nonfunctional requirements
 
 | ID | Requirement | Verification |
 |---|---|---|
-| NFR-01 | Default-deny, trusted gate and least privilege for each protected action. | Negative tests; direct resource and tampering tests. |
-| NFR-02 | Informed consent; limited biometric retention; restricted storage. | Privacy checklist; deletion procedure. |
-| NFR-03 | No real credentials, tokens, OTP seeds, QR codes, voice samples or embeddings committed. | Repository inspection, sanitized screenshots/exports. |
-| NFR-04 | Consistent audio preparation and validated score format. | Reproducible recordings and tests. |
-| NFR-05 | Fail closed on Keycloak/token failure or any failure on the selected path; model failure does not authorize voice access or silently switch methods. | Failure cases documented. |
-| NFR-06 | Document Kali release, tool versions, voice-only Python dependency versions, model revision/hash, configuration and threshold. | Reproduction by teammate; Python confined to voice inference. |
-| NFR-07 | Minimal clear terminal prompts, browser login and error feedback. | Walkthrough. |
-| NFR-08 | Measure authentication time and voice inference time separately. | Actual timed results on declared hardware. |
-| NFR-09 | Isolate the lab; protected data and biometric store not accessible to demo users. | Permissions, listener and network review. |
-| NFR-10 | TLS for token exchanges; trusted endpoint, restricted secret handling, no raw token in command line/logs; revoke session on recovery. | Configuration and negative tests. |
+| NFR-01 | Default to denial and apply least privilege at every protected operation. | Only a recognized role, allowed operation and complete current method dispatch once. |
+| NFR-02 | Obtain consent before capture, minimize stored biometric data and honor deletion. | A participant can decline or withdraw. No routine raw-frame retention. Deletion disables the template and clears dependent evidence. |
+| NFR-03 | Keep secrets, tokens, OTP setup material, templates and raw captures out of the repository and exported evidence. | A review of tracked files, proposed changes and sanitized evidence finds none of these items. |
+| NFR-04 | Use the same validated preprocessing, descriptor shape and finite score policy at enrollment and verification. | The pinned stack handles agreed inputs reproducibly. Corrupt images, unexpected dimensions and invalid scores fail closed. |
+| NFR-05 | Fail closed when required identity or selected-factor dependencies fail. | Face failure blocks face access. TOTP can complete independently when only the face component is unavailable. |
+| NFR-06 | Make local operation reproducible on the pinned Kali VM after dependency setup. | A teammate can load the same packages and model checksums and run inference with external network access disabled. |
+| NFR-07 | Give clear, actionable browser prompts for method choice, capture, cancellation and failure. | A walkthrough identifies the selected method and gives a next action without revealing account details or a similarity score. |
+| NFR-08 | Measure end-to-end authentication time and face inference time separately on declared hardware. | Report timer boundaries, cold/warm conditions, counts and observed median/range per route. Enforce a bounded inference timeout. |
+| NFR-09 | Restrict the app, private biometric state and protected resource to the local lab boundary. | The service binds only to approved local interfaces. The demo user cannot read or modify private state. |
+| NFR-10 | Protect identity and application traffic, server-side tokens, secrets and session cookies. | TLS and client identity checks succeed with the trusted CA. Invalid TLS or expired/revoked identity is denied and logs contain no raw secrets. |
 
 ## 7. Technical interfaces
 
-See `contracts/api.md`. No custom HTTP service. Proposed two confidential Keycloak device-flow clients within one realm, each with dedicated browser flow: required password+OTP for TOTP, required password for voice. Gate chooses client from fixed trusted configuration and validates newly issued token via introspection, including issuer, expected client, audience, subject, expiry and role. Client-specific browser-flow override in actual device authorization must be proven; if not supported or bypassable, stop and revise approved architecture. No user-pasted tokens, direct password grants, unverified JWTs or caller success flags.
+See [the integration contract](contracts/api.md). The browser initiates a server-controlled authentication attempt with a fixed method, action and expiration. Keycloak provides authenticated user identity, password verification, the TOTP decision on the selected TOTP path and appropriately verified factor evidence. The trusted gate must validate issuer, subject, expected client and audience, token activity, role and the real factors executed; it must not treat an active token or an arbitrary client name as proof of TOTP.
 
-Voice path only: ALSA/FFmpeg -> local SpeechBrain adapter -> gate. Audio is 16-kHz mono signed PCM WAV, 3–10 s, at most 10 MiB. Three voice attempts and five-minute gate attempt window are provisional limits; respect shorter token/device expiry. Enforce account-level throttling across restarts and both paths; no automatic fallback. Switching explicitly cancels and clears state, starts a new attempt and fresh password.
+The face path uses browser camera capture -> trusted Node.js/Human verifier -> server-side gate. The browser supplies bounded JPEG input and an active transaction context, not a trusted result. The verifier applies fixed preprocessing, detects exactly one acceptable face, extracts a valid descriptor and compares it only to the server-selected active reference. A malformed or timed-out result is denied. Threshold, model version, quality settings and score equality rule belong to the server and are frozen before evaluation.
+
+Configure two suitably isolated Keycloak clients or supported authentication flows for the selected routes. The actual Keycloak release must demonstrate fresh password enforcement, the required TOTP factor and protection against SSO or alternate-grant bypass. Sensitive credentials and client secrets stay server-side. Face model failure does not authorize face access or silently switch the user to TOTP.
 
 ## 8. State and storage
 
-- Keycloak owns password credentials, TOTP credentials, identities and roles. The phone holds the TOTP secret; do not copy it to the gate.
-- Gate-owned restricted directory stores enrolled reference/template, validated subject association, version and approval state; use opaque safe identifiers, not user input paths. Lock concurrent updates, use atomic writes and never follow untrusted symlinks.
-- The gate retains access token and attempt state only in its trusted process/protected temporary storage; verify active token, expected issuer/client/audience, trusted subject and application role and selected client again before dispatch. Reject inconsistent/missing claims. Never expose token or trust locally decoded unverified JWT claims.
-- Store selected path and its trusted result only for the active one-operation attempt; bind voice pass to enrollment version; discard on completion, failure, timeout, logout, or revocation. No public voice state endpoint.
-- Record sanitized audit events and test outcomes; raw evidence stored privately and deleted after the agreed retention period.
+- Keycloak manages accounts, passwords, TOTP credentials and roles; the separate authenticator device generates TOTP codes. The gate must not store OTP seeds.
+- The private server stores only approved face references, verified issuer/subject association, active reference version and supervised approval state. Raw frames are not routinely retained.
+- The server keeps selected method, action, session, attempt identifier and verified-factor state together. It clears invalid or expired attempts and prevents a verified result from being reused across sessions, users or methods.
+- Enrollment and replacement use restricted access, target-bound single-use approvals, atomic updates and invalidation of earlier reference versions and outstanding proofs.
+- The protected resource is accessible only to the authorized service identity. Server-side tokens and secrets are restricted, and audit records omit recoverable credentials or biometric content.
+- Biometric deletion, recovery and logout invalidate dependent authorization evidence. Private test samples and sanitized report evidence follow the agreed retention rules.
 
 ## 9. Workflows
 
 ### 9.1 Login and verification
 
-1. User selects TOTP or voice in trusted terminal. Gate creates a unique attempt with fixed method, expected client, action and expiry.
-2. Gate initiates supported Keycloak device authorization with selected client. User opens trusted browser, enters password; TOTP path additionally requires a fresh code. No SSO shortcut.
-3. Gate validates the token returned by that exact attempt using trusted introspection. Check issuer, expected client/audience, subject, expiry and role. Missing or inconsistent claims deny access.
-4. TOTP path: validated token from the proven required password+OTP flow satisfies the second factor. No microphone or voice check is required. Voice path: token proves password only; gate selects the subject's approved active reference, captures fresh audio, and invokes SpeechBrain. Only an explicit valid match satisfies the second factor.
-5. Gate revalidates token, role and method-specific state (including enrollment version for voice) before dispatching an allowlisted protected action. Clear attempt on completion or error. If user changes method, cancel and restart; do not transfer tokens or factor status.
+1. The user selects TOTP or face. The gate creates a new attempt with fixed method, expected client, requested operation and expiry.
+2. Keycloak performs a fresh username/password login for the selected method. On the TOTP route, it also verifies the enrolled one-time code. Existing browser SSO and alternate grants cannot skip required factors.
+3. The gate validates current trusted identity and relevant authentication evidence. Unknown, expired or inconsistent client, issuer, subject, audience or role information causes denial.
+4. **TOTP route:** Valid evidence of the completed password-and-OTP flow satisfies the selected second factor without any webcam check. **Face route:** The server locates the current approved reference for the authenticated subject, receives a new bounded webcam frame and requests a private Human comparison. A match is bound to this attempt and reference version.
+5. The gate rechecks active session, selected method, second-factor proof, current reference version when applicable, role and allowed action immediately before dispatch. The attempt ends after one operation, cancellation, logout, expiration or failure. Changing method requires a new login.
 
 ### 9.2 Enrollment
 
-Existing TOTP enrollment is supervised; record no seed or QR. Voice enrollment needs successful password+TOTP, prior short-lived administrator approval created after password+TOTP and supervised identity check, and consent. Gate stores reference only against trusted subject, consumes approval and audits. Enrollment itself does not open a protected resource. Initial administrator bootstrap is offline and documented.
+TOTP enrollment occurs through supervised Keycloak setup without exposing QR codes or seeds. Initial face enrollment requires the owner's fresh password and TOTP, consent, and a short-lived, target-bound administrator approval following supervised identity checking. The server validates the face sample, binds the reference to the verified subject, consumes the approval once and audits the change. Enrollment does not unlock a protected resource.
 
 ### 9.3 Recovery
 
-Password/TOTP reset follows authorized Keycloak procedures, with identity checks, audit, and affected session revocation. Voice replacement requires supervised identity check and approved admin TOTP-path action; old reference and outstanding attempts invalidated. New reference enrolled through the approved TOTP path. Lost factor does not grant access to factor management; no silent downgrade or automatic fallback. A user can explicitly start a new login with another already enrolled factor. Report the weaker-path risk.
+Password and TOTP reset follow supervised identity verification through authorized Keycloak procedures. Affected sessions are revoked, while applicable roles and the approved face reference remain associated with the account. Face replacement requires the owner's fresh password + TOTP and supervised administrator approval; the old reference and outstanding proofs are invalidated atomically. No automatic fallback or silent relaxation of enrollment rules is allowed. An already enrolled alternative method may be selected in a new ordinary login attempt.
 
 ## 10. Evaluation and minimum acceptance
 
-Use `tests/test_cases.md` for the complete matrix. Test both complete paths, password-only, wrong selected factors, cross-path token substitution, switching/cancellation, direct OS bypass, authorization, token expiry, enrollment tampering, replay and system errors. The voice threshold is an experiment, not a guarantee. Record a replay outcome even if the attack succeeds. Baselines are separate isolated evaluation modes/fixtures, never a bypass in the final gate.
+Use the root [test matrix](test_cases.md) to record **Expected** and **Observed** outcomes. Its current numbered cases are not evidence of completed tests. Evaluate complete selected paths, password-only denial, wrong factors, session expiration, role restrictions, method switching, forged browser success, cross-account reference tampering, supervised recovery, model failure, direct resource access and concurrent replacement.
 
-- [ ] All computer-side execution is on Kali; Python is confined to the SpeechBrain library and minimal voice adapter.
-- [ ] Instructor accepts the voice-only Python exception, external tools and shell/config integration; pretrained model runs on Kali.
-- [ ] Password is mandatory for both paths; TOTP is mandatory only on TOTP path; no SSO/alternate grant or cross-client bypass.
-- [ ] Voice path requires current subject’s fresh voice result; TOTP path works without voice; direct access denied.
-- [ ] RBAC, approval, recovery, expiry and failure behavior tested.
-- [ ] Actual genuine/impostor/replay observations, timing, limitations and baseline comparison documented.
-- [ ] No biometric or credential material committed; report and figures match actual work.
+Record genuine and impostor trial counts separately using a fixed threshold, and conduct consented print/screen/video presentation trials where feasible. Calculate false accepts per impostor attempts and false rejects per genuine attempts with explicit denominators. Compare both paths with an isolated password-only baseline on the same declared hardware; do not expose the baseline as a gate bypass.
 
-## 11. Phase 2 submission requirements (preserved from original repository)
+- [ ] All computer-side components run on Kali Linux using the approved JavaScript and Keycloak configuration, without Python.
+- [ ] Keycloak enforces fresh password authentication on both paths and fresh OTP on the TOTP path without an SSO or cross-client shortcut.
+- [ ] Human runs in a trusted local Node.js component using pinned model and matching settings; browser-only results cannot authorize access.
+- [ ] TOTP works without the webcam; face verification requires the current subject's approved reference and a fresh match.
+- [ ] Both complete paths can perform only authorized operations; password-only, direct access and wrong-role requests are denied.
+- [ ] Consent, administrator-approved enrollment/replacement, recovery, session expiry and failures are tested.
+- [ ] Actual genuine/impostor/presentation outcomes, timing, limitations and isolated baseline observations are documented.
+- [ ] No real credentials, OTP secrets, facial images or templates are committed; unfinished tests remain pending.
+
+## 11. Phase 2 submission requirements
 
 | Section | Required content | Lead |
 |---|---|---|
-| Preliminary Knowledge | ~400 words, at least 4 references, concepts and supporting studies | Omar coordinates; all contribute |
-| Proposed Model | 1,500–2,000 words; goals, stepwise flows, architecture diagram, justification, differences, components and parameters | Anas integrates; all owners contribute |
-| Simulation Results | Real setup, inputs, numbered figures/tables/screenshots, baseline, actual outcomes, analysis and limitations | Hamzeh compiles; all contribute |
+| Preliminary Knowledge | About 400 words and at least four references on the concepts and supporting studies | Omar coordinates; all contribute |
+| Proposed Model | 1,500–2,000 words describing goals, architecture, authentication flows, rationale, components and parameters | Anas integrates; each owner contributes |
+| Simulation Results | Real lab setup, inputs, numbered figures/tables, observed decisions, baseline comparison and limitations | Hamzeh compiles; all contribute |
 
-Original requirements record deadline **30 November 2026**, participation by every member in all three phases, and a four-mark deduction for any phase whose reported AI-generated content percentage exceeds 20% (per phase). Verify the original handout; this redesign is a planning aid, not text to submit without team review and original work.
+The course handout lists Phase 2 on **30 November 2026** (8 marks), and Phase 3 with presentation on **20 December 2026** (12 marks). All five students contribute across the three phases. The project manager submits the cumulative Word report in the required course format. The original handout's stated AI-content deduction should be checked against the instructor's current instructions. This file is a build specification, not a claim of completed experiments.
 
 ## 12. Open decisions and feasibility gates
 
-1. Instructor approval for external tools, voice-only Python and Bash; strict official-tool-only interpretation would block this proposal.
-2. Tested SpeechBrain environment, exact package versions/model revision and checksum, output format, score direction, threshold and engine error behavior.
-3. Tested two Keycloak device-flow clients, per-client browser override behavior, required fresh password on both and OTP on TOTP path, introspection claims and TLS.
-4. Safe local gate execution, service identity, microphone device access and no direct protected-file access. If this cannot be established, demonstrate components separately and report incomplete integration.
-5. Admin evidence and initial bootstrap procedure; retention; concurrency and throttling settings.
+1. Verify instructor approval for Keycloak, Human, Node.js, browser capture and supporting tools within the Kali-only, no-Python restriction.
+2. Confirm a reproducible Human Node.js CPU configuration, model version/checksums, image limits, descriptor shape, score direction, calibrated threshold and error handling.
+3. Demonstrate both Keycloak authentication paths on the pinned release, including actual factor evidence, fresh password/OTP behavior, callback binding, token validation, session expiration and SSO bypass tests.
+4. Prove that the trusted gate owns the protected resource, private face references, authentication sessions and final authorization decision; an ordinary OS user must not reach them directly.
+5. Finalize supervised initial enrollment, administrator bootstrap, reference deletion, factor recovery, retention, concurrency and throttling rules. Report any unverified integration as pending.
 
-Source basis: original repository requirements and team documents (23 November 2026), prior Phase 1 report/Phase 2 handout cited there (not independently retrieved), and revised user direction. External technical references: [Keycloak admin guide](https://www.keycloak.org/docs/latest/server_admin/), [OIDC endpoints and grants](https://www.keycloak.org/securing-apps/oidc-layers), [SpeechBrain speaker API](https://speechbrain.readthedocs.io/en/latest/API/speechbrain.inference.speaker.html), [ECAPA-TDNN model](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb), [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html).
+Source basis: the original repository requirements structure and the revised Group 1 face/TOTP requirements. Background documentation: [Keycloak administration](https://www.keycloak.org/docs/latest/server_admin/), [Keycloak OIDC](https://www.keycloak.org/securing-apps/oidc-layers), [Human repository](https://github.com/vladmandic/human) and [NIST SP 800-63B](https://pages.nist.gov/800-63-4/sp800-63b.html).
