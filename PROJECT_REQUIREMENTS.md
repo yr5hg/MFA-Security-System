@@ -1,333 +1,182 @@
-# Project Requirements — User Accounts and Voice-Based Verification Security
+# Project Requirements — Password, TOTP and Voice-Based Verification on Kali Linux
 
-**Document version:** Draft v0.1  
-**Date:** 23 November 2026  
-**Phase:** Information Systems Security — Phase 2 (due **30 November 2026**)  
-**Status:** Proposed implementation requirements for team review; **not** a record of completed implementation or successful testing.  
-**Related documents:** `contracts/api.md`, `TEAM_RESPONSIBILITIES.md`
+**Version:** Draft v0.2 (revised 25 November 2026)  
+**Phase:** Information Systems Security — Phase 2, due **30 November 2026** (original repository deadline)  
+**Status:** Proposed requirements, not evidence of implementation.  
+**Companions:** `TEAM_RESPONSIBILITIES.md`, `contracts/api.md`, `docs/KALI_SETUP.md`.
 
 ## 1. Project overview
 
-Build a **small educational account service** that combines Keycloak username/password authentication, **experimental** voice-based speaker verification, role-based access control (RBAC), and controlled account/voice recovery. The implementation must demonstrate that **password authentication alone cannot unlock protected resources** and that only requests with an appropriate role can perform administrator operations. The system will be evaluated with repeatable positive and negative test cases, including voice mismatches and replayed recordings.
+Implement a small laboratory account service that combines three categories of authentication: knowledge (password), possession (a separately enrolled TOTP authenticator), and experimental inherence (speaker matching). Keycloak handles username/password and mandatory TOTP; Google Authenticator generates the code on the user's phone. An existing native voice inference engine compares a fresh recording to the account's approved reference. A trusted access gate on Kali enforces all three checks and the required role before opening a protected lab resource. The minimum demonstration is terminal-based, with a browser only for Keycloak login. No custom web application or machine learning training is required.
 
-The Phase 1 report specifies Keycloak, a separate Python voice-verification service using **SpeechBrain's pretrained ECAPA-TDNN**, and server-side verification of the **same account and login session**. It does **not** claim a novel ML model, production security, or successful results before testing. The proposed endpoints, role strings, sample-rate requirements, and limits below are **team design decisions** adopted from the preliminary API contract; the team should confirm them before implementation.
+This supersedes the previous Phase 1 password + voice implementation plan. Preserve Keycloak, RBAC, least privilege, controlled enrollment/recovery, ECAPA-TDNN model family and security evaluation. Replace the custom web/API stack and Python runtime with existing native Linux tools and minimal Bash integration. Keycloak and the native voice engine are external software installed on Kali; the instructor must approve them and any shell scripting. The model must be preconverted so no conversion script or Python runtime is required in project execution.
 
-> **Security and standards boundary:** Voice biometric comparison is an **academic experiment**, not a NIST SP 800-63B-4-compliant authenticator and not a phishing-resistant or replay-resistant solution. A speaker similarity match is not proof that the actual person is physically present. Test and report this limitation rather than claiming otherwise.
+**Standards boundary:** the voice factor is experimental. Speaker comparison is not proof of liveness, not phishing resistant, and must not be claimed compliant with NIST SP 800-63B-4. Password + TOTP is conventional 2FA; the project evaluates adding an experimental third check rather than claiming production-grade three-factor assurance. TOTP is also susceptible to phishing and code theft.
 
 ## 2. Scope
 
-### 2.1 In scope (minimum prototype)
-
-- Demonstration accounts managed in Keycloak; password authentication and application roles.
-- Browser interface for login, enrollment and new voice recordings.
-- Administrator-approved initial voice enrollment and controlled replacement.
-- Pretrained ECAPA-TDNN speaker verification (no training from scratch).
-- Protected area requiring **valid password-authenticated session + successful session-bound voice check**.
-- Administrator-only operation requiring the same checks **plus** the `administrator` role.
-- Password reset that **preserves** existing voice-enrollment requirement and role.
-- Documented tests for incorrect password, wrong voice, missing voice, replay, authorization, and recovery.
-- Phase 2 technical report with architecture, reproducible setup, actual experimental results, and limitations.
-
-### 2.2 Out of scope for Phase 2
-
-- Production deployment, large user base, cloud hosting, or a polished UI.
-- Training a neural network from scratch or claiming to invent a new authentication algorithm.
-- Guaranteed liveness detection, deepfake detection, replay protection, or NIST assurance compliance.
-- Adding Google Authenticator/TOTP as the second factor (this **new voice-based Phase 1** supersedes the older TOTP plan).
-- Public registration or self-service modification of another account's enrolled voice.
+| In scope | Out of scope |
+|---|---|
+| Kali Linux lab, Keycloak, Google Authenticator, native CLI, shell integration | Windows runtime, custom Python code/runtime, FastAPI or Python voice service |
+| Mandatory password and TOTP, third voice check, RBAC | Facial recognition, speech-to-text, new model training |
+| Admin-approved enrollment, reset and recovery | Public registration, unsupervised recovery, cloud/public deployment |
+| Controlled resource and repeatable security evaluation | Production-grade liveness or anti-spoof guarantees, standards certification |
 
 ## 3. Components and ownership
 
-| Component | Lead | Technology / role |
+| Component | Owner | Proposed technology |
 |---|---|---|
-| Identity and login | **Omar Aljaouni (20230186)** | Keycloak (locally via Docker), OIDC, demo users and client roles |
-| Browser UI and audio capture | **Sara Alqadi (20230493)** | HTML/CSS/JavaScript, microphone, uploads and UI feedback |
-| Speaker verification | **Yousef Taha (20230981)** | Python, SpeechBrain, pretrained ECAPA-TDNN, similarity/threshold |
-| Main backend and access enforcement | **Anas Musa (20201119)** | FastAPI, OIDC/session, RBAC, voice-state binding, recovery |
-| Testing and evaluation | **Hamzeh Abu Jumaa (20230911)** | pytest, curl, Nmap in authorized lab, audio test cases, results |
+| Identity and first two factors | Omar Aljaouni | Keycloak, Google Authenticator, Java runtime or approved container, curl/jq |
+| Recording and enrollment interaction | Sara Alqadi | ALSA `arecord`, FFmpeg/ffprobe, Bash |
+| Voice comparison | Yousef Taha | voice-detect.cpp native C++ binary, preconverted ECAPA-TDNN GGUF, CMake |
+| Integration, protected resource and recovery | Anas Musa | restricted Bash gate, curl/jq, OS accounts/permissions, Keycloak device flow and introspection |
+| Evaluation | Hamzeh Abu Jumaa | Kali, Nmap, Wireshark, curl, shell tools, consented recordings |
 
-**Overall communication:** Browser -> Main Backend -> Internal Voice API. The browser may be redirected to Keycloak for password login, but must not call the internal voice service or Keycloak administrative interfaces directly.
+All server-side project components run on Kali. Google Authenticator runs on a separate phone. Use a dedicated lab realm/client, distinct service and unprivileged operator/demo accounts, and a protected resource that is not directly readable by the user. All owners must contribute implementation, tests and report evidence.
 
 ## 4. Actors and permissions
 
-**Actors:** unauthenticated visitor; `regular_user`; `administrator`; administrator performing supervised enrollment/recovery; internal voice service.
+Retain realm `voice-demo`; proposed client `voice-terminal` (supersedes `voice-web`). Application client roles remain `regular_user` and `administrator` (case-sensitive). These are not Keycloak console-admin permissions. Account identity is the validated issuer + `sub`, not a caller-entered username.
 
-**Proposed Keycloak settings:** realm `voice-demo`, OIDC client `voice-web`, **client roles** exactly `regular_user` and `administrator` (lowercase, case-sensitive). These are application permissions; they are **not** Keycloak console-admin privileges.
-
-| Operation | Visitor | `regular_user` | `administrator` |
+| Operation | Visitor | Regular user | Administrator |
 |---|---|---|---|
-| Open login page | Allow | Allow | Allow |
-| Read `/api/me` after password login | Deny | Allow | Allow |
-| Submit own voice verification (if enrolled) | Deny | Allow | Allow |
-| View `/api/protected` | Deny | Allow **after voice pass** | Allow **after voice pass** |
-| Invoke `/api/admin` | Deny | Deny | Allow **after voice pass** |
-| Approve / reset voice enrollment | Deny | Deny | Allow **after voice pass + identity check** |
+| Start Keycloak login | Yes | Yes | Yes |
+| Record own voice attempt | No | After password + TOTP | After password + TOTP |
+| Enroll own reference | No | After password + TOTP and active admin approval | Same |
+| Read protected lab resource | No | After all three checks | After all three checks |
+| Execute defined admin-only operation | No | No | After all three checks |
+| Approve enrollment or voice replacement | No | No | After all three checks and documented identity evidence |
 
-**First-administrator bootstrap:** A new deployment may need a **one-time supervised administrative bootstrap** to enroll its first administrator. Document that local setup explicitly; do not create a publicly accessible bypass route.
+First administrator setup is a one-time supervised offline bootstrap under lab operator control. Never create a normal authentication bypass for bootstrap or recovery. Separate administrator-assisted TOTP recovery is handled through authorized Keycloak admin procedures with identity checks, audit records and session revocation.
 
-## 5. Functional requirements (FR)
+## 5. Functional requirements
 
-Each requirement is considered complete only after its **acceptance evidence** is collected. Record test IDs and screenshots/logs where applicable.
+Preserve original FR IDs where possible; new TOTP requirements are FR-27–FR-29. Every requirement needs actual acceptance evidence.
 
 ### 5.1 Account identity and login
 
-| ID | Requirement | Acceptance criteria / evidence |
+| ID | Requirement | Acceptance evidence |
 |---|---|---|
-| **FR-01** | Administrator can create designated demonstration accounts in Keycloak. | Two test accounts exist and can be distinguished by trusted Keycloak IDs. |
-| **FR-02** | Keycloak applies the configured password policy to the demonstration accounts. | Weak/noncompliant password is rejected as configured; compliant password is accepted. |
-| **FR-03** | Keycloak authenticates username/password through the proposed OIDC application flow. | Correct credentials create a password-authenticated application session; incorrect credentials do not. |
-| **FR-04** | Application roles are configured in Keycloak and available to the backend as trusted claims or server lookup. | `/api/me` accurately reports each test user's role; browser-supplied role changes are ignored. |
-| **FR-05** | Logout ends the application login state and clears the associated voice verification state. | After logout, protected API returns unauthorized until a new login + voice check. |
+| FR-01 | Create designated demonstration accounts in Keycloak. | Two distinct account subjects and assigned roles. |
+| FR-02 | Enforce configured password policy and brute-force protection. | Weak password rejected; rate/lockout settings demonstrated safely. |
+| FR-03 | Authenticate correct password through the supported Keycloak browser flow used by the dedicated client. | Wrong password cannot produce an accepted login. |
+| FR-04 | Obtain trusted identity and client roles from validated Keycloak data. | Caller-supplied IDs/roles cannot influence authorization. |
+| FR-05 | End gate attempt on logout, expiry or completion; no reusable voice-pass flag. | New operation requires fresh authentication; expired/revoked tokens denied. |
+| FR-27 | Configure mandatory TOTP for all demo roles and use Google Authenticator on a separate device. | Enrollment documented without exposing seed or QR; correct fresh code works. |
+| FR-28 | Block missing, incorrect, expired and reused TOTP as configured; disable password-only/alternative authentication paths for the dedicated client. | Negative tests including existing browser SSO, unconfigured OTP, and direct grant. Record actual replay/window behavior; resolve bypass before acceptance. |
+| FR-29 | TOTP reset requires supervised identity verification, invalidates affected sessions, and preserves role and voice requirements. | Recovery audit; new enrollment and all three factors required before access. |
 
 ### 5.2 Voice enrollment and speaker verification
 
-| ID | Requirement | Acceptance criteria / evidence |
+| ID | Requirement | Acceptance evidence |
 |---|---|---|
-| **FR-06** | Browser captures a voice recording after microphone permission is granted. | A 3–10 second test clip can be recorded and uploaded; permission denial displays a clear error. |
-| **FR-07** | Initial voice enrollment requires server-recorded administrator approval after identity verification. | Unapproved enrollment is denied; an approved test account can enroll its own voice. |
-| **FR-08** | Enrollment associates a reference voice (or derived protected template) with the verified Keycloak account ID, not a client-chosen ID. | Attempts to enroll for another user through modified request data fail. |
-| **FR-09** | Main backend validates and normalizes incoming audio before calling the voice service. | Supported inputs are converted to internal 16-kHz mono PCM WAV; malformed inputs are rejected. |
-| **FR-10** | Voice service compares an enrolled reference recording and a fresh recording using pretrained SpeechBrain ECAPA-TDNN. | Service returns a machine-readable match decision, similarity score, threshold, and model name. |
-| **FR-11** | Acceptance threshold is documented and evaluated on representative test recordings. | Threshold and observed matching/nonmatching results are included in experimental evidence; no fabricated accuracy claims. |
-| **FR-12** | A passing voice result applies **only** to the currently authenticated user and login session. | A previous session's pass or another account's result cannot unlock protected access. |
-| **FR-13** | If voice verification fails, is missing, or the service is unavailable, protected access is denied. | Failed, missing, and unavailable voice checks all prevent access to protected endpoints. |
+| FR-06 | Record a fresh microphone clip on the trusted Kali host, normally 3–10 seconds. | Microphone success and device/error handling. |
+| FR-07 | Require short-lived administrator approval for initial voice enrollment after identity check. | Unapproved enrollment denied; approval single-use. |
+| FR-08 | Associate the reference with the validated account subject. | Another user's reference cannot be selected by the caller. |
+| FR-09 | Validate and normalize audio to signed 16-bit PCM WAV, 16 kHz mono; impose duration and size limits. | Format inspection and malformed/oversized input rejected. |
+| FR-10 | Use existing native inference with preconverted ECAPA-TDNN weights for 1:1 comparison. | Known genuine and impostor clips produce documented native scores and decisions without Python. |
+| FR-11 | Select and document a threshold after calibration; freeze it before evaluation. | Disjoint calibration/evaluation attempts, chosen threshold, engine version and score direction recorded. |
+| FR-12 | Bind voice pass to current attempt, validated subject, token/session and enrollment version. | Another account/session/old enrollment cannot reuse a pass. |
+| FR-13 | Deny missing/mismatched/error/timeout results. | No protected access on failed recording, corrupt model, unexpected output or voice mismatch. |
 
 ### 5.3 Protected access and recovery
 
-| ID | Requirement | Acceptance criteria / evidence |
+| ID | Requirement | Acceptance evidence |
 |---|---|---|
-| **FR-14** | `/api/protected` requires both valid application authentication and a passing voice check for that session. | Tests pass for password+matching voice; fail for password-only, voice-only, and wrong voice. |
-| **FR-15** | `/api/admin` additionally requires Keycloak application role `administrator`. | Verified regular user receives 403; verified administrator succeeds. |
-| **FR-16** | Authorization is enforced **server-side for every protected request**, including direct HTTP calls. | Direct curl/pytest requests cannot bypass role or voice checks by hiding/showing UI controls. |
-| **FR-17** | Password reset preserves application role and voice-enrollment requirement. | After reset, previous role remains and a new session still needs voice verification. |
-| **FR-18** | Replacing a lost/invalid reference voice requires documented administrator-assisted identity verification and an approved recovery action. | Unauthorized replacement is denied; supervised approved replacement is recorded. |
-| **FR-19** | Approved voice replacement invalidates the old enrollment and all affected voice-pass states. | Old reference no longer authorizes future logins; a new reference must be enrolled. |
-| **FR-20** | The system records non-sensitive audit information for enrollment and recovery decisions. | Test evidence includes action, account reference, administrator, timing, evidence type checked, and outcome; not raw secrets. |
+| FR-14 | Require password + TOTP + voice for protected access. | All-three success; first-two-only denied; voice alone denied. |
+| FR-15 | Require the `administrator` role in addition to all three factors for admin operation. | Regular user denied; authorized admin allowed. |
+| FR-16 | Enforce checks in a trusted gate; directly accessing protected data, modifying client inputs or invoking arbitrary commands cannot bypass it. | OS permission tests; direct access and role-tampering tests. |
+| FR-17 | Password reset preserves roles and reference; revokes relevant sessions and requires all factors for new access. | Old attempt denied; new 3FA required. |
+| FR-18 | Voice replacement needs verified administrator identity check and explicit approval. | Unauthorized replacement denied. |
+| FR-19 | Replacement invalidates prior reference version and outstanding voice states. | Old reference/version cannot unlock access. |
+| FR-20 | Log non-sensitive audit events for login outcomes, enrollment and recovery. | Action, pseudonymous account, actor, time and outcome; no secrets/audio. |
 
 ### 5.4 Evaluation and reporting
 
-| ID | Requirement | Acceptance criteria / evidence |
+| ID | Requirement | Acceptance evidence |
 |---|---|---|
-| **FR-21** | Test matching speakers and different speakers with consented demonstration recordings. | Test plan and actual observations are recorded. |
-| **FR-22** | Test at least one **replayed recording** and, if feasible and consented, an imitation/synthetic-voice case. | Actual acceptance or rejection is documented; **no claim of guaranteed replay prevention**. |
-| **FR-23** | Test incorrect password, missing voice, nonmatching voice, access with wrong role, and recovery denial. | Expected vs. observed results exist for each completed test. |
-| **FR-24** | Evaluate similarity thresholds with appropriate metrics where data supports them. | Report counts and FAR/FRR, explicitly identifying denominators and small-sample limits. |
-| **FR-25** | Identify lab-exposed services and API behaviors using authorized tools. | curl/pytest endpoint checks and optional Nmap local scan logged without exposing a public target. |
-| **FR-26** | Present an actual Phase 2 evaluation and an appropriate baseline/comparison. | Charts/tables/screenshots include labels, settings, dataset size, baseline, observed results, and limitations. |
+| FR-21 | Test consenting genuine and impostor speakers. | Actual counts and observations. |
+| FR-22 | Test replay of a consenting enrolled speaker; optional consented synthetic/imitation clip. | Record acceptance or rejection, not guaranteed detection. |
+| FR-23 | Test password, TOTP, voice, role, recovery and bypass failure cases. | Expected versus observed matrix. |
+| FR-24 | Report FAR/FRR and threshold methodology with denominators and sample-size limits. | Actual confusion counts, threshold and timing. |
+| FR-25 | Inspect authorized lab-exposed services and protected access using Kali tools. | Scoped Nmap, Wireshark, curl and local permission evidence as appropriate. |
+| FR-26 | Compare SFA, 2FA and proposed 3FA using measured lab outcomes and response times. | Labeled baseline results, analysis and limitations; no fabricated results. |
 
-## 6. Nonfunctional requirements (NFR)
+## 6. Nonfunctional requirements
 
 | ID | Requirement | Verification |
 |---|---|---|
-| **NFR-01 Security** | Default deny; valid authentication, voice state and correct role checked on the server. | Negative tests and direct API requests. |
-| **NFR-02 Privacy** | Collect voice recordings only with informed consent; use demo accounts; restrict access to files/templates. | Storage/consent checklist and repo inspection. |
-| **NFR-03 Secret management** | No passwords, OIDC client secrets, tokens, voice samples or embeddings committed to Git. | `.gitignore` review and repository check. |
-| **NFR-04 Audio consistency** | Use the same documented preprocessing for enrollment and login. | Reproducible audio conversion/test scripts. |
-| **NFR-05 Reliability** | If Keycloak/session validation or voice service fails, access is denied without silently bypassing a check. | Failure injection tests. |
-| **NFR-06 Reproducibility** | Setup instructions specify OS, Python/package versions, model identifier, thresholds and commands. | A second member can follow README and reproduce test setup. |
-| **NFR-07 Minimal UI** | Clear prompts and messages for microphone errors, missing enrollment and voice mismatch. | Manual frontend walkthrough. |
-| **NFR-08 Performance reporting** | Record voice-verification timing under declared test hardware; don't assume an untested speed target. | Timed results and environment description. |
-| **NFR-09 Local isolation** | Voice API accessible only from trusted local backend/network; no open public demo by default. | Address/network configuration review. |
-| **NFR-10 Web security** | Use protected session cookies, safe OIDC callback handling and CSRF protection for browser state-changing operations. | Code review and targeted tests; HTTPS required if deployed beyond loopback. |
+| NFR-01 | Default-deny, trusted gate and least privilege for each protected action. | Negative tests; direct resource and tampering tests. |
+| NFR-02 | Informed consent; limited biometric retention; restricted storage. | Privacy checklist; deletion procedure. |
+| NFR-03 | No real credentials, tokens, OTP seeds, QR codes, voice samples or embeddings committed. | Repository inspection, sanitized screenshots/exports. |
+| NFR-04 | Consistent audio preparation and validated score format. | Reproducible recordings and tests. |
+| NFR-05 | Fail closed on Keycloak, token validation, model, timeout or parsing failure. | Failure cases documented. |
+| NFR-06 | Document Kali release, tool versions, build commit, model hash, configuration and threshold. | Reproduction by teammate; no Python project runtime. |
+| NFR-07 | Minimal clear terminal prompts, browser login and error feedback. | Walkthrough. |
+| NFR-08 | Measure authentication time and native inference time separately. | Actual timed results on declared hardware. |
+| NFR-09 | Isolate the lab; protected data and biometric store not accessible to demo users. | Permissions, listener and network review. |
+| NFR-10 | TLS for token exchanges; trusted endpoint, restricted secret handling, no raw token in command line/logs; revoke session on recovery. | Configuration and negative tests. |
 
-## 7. Agreed technical interface (Draft v0.1)
+## 7. Technical interfaces
 
-### 7.1 Execution environment
+See `contracts/api.md` for the agreed local command/data interfaces; the legacy filename is retained for continuity, but the old web endpoints are retired. Proposed architecture: dedicated Keycloak device authorization client -> fresh browser password and TOTP -> trusted gate -> ALSA/FFmpeg -> native CLI -> protected local operation. Use a supported confidential client and server-side introspection/role mapping; explicitly validate token context and dedicated MFA flow. No browser-supplied success flags, no direct resource owner password grant, no custom HTTP service required.
 
-| Component | Proposed address | Platform |
+Audio: 16 kHz mono PCM signed 16-bit WAV, normally 3–10 s, at most 10 MiB; actual threshold, limits and score output must be agreed/tested. Device flow expiry, polling intervals, and server token lifetime must be honored. Proposed max three voice attempts per login and five-minute overall gate attempt window (shorter if token/device code expires). Start a new login after terminal failure; apply persistent account-level throttling to prevent repeated new-login bypass of rate limits.
+
+## 8. State and storage
+
+- Keycloak owns password credentials, TOTP credentials, identities and roles. The phone holds the TOTP secret; do not copy it to the gate.
+- Gate-owned restricted directory stores enrolled reference/template, validated subject association, version and approval state; use opaque safe identifiers, not user input paths. Lock concurrent updates, use atomic writes and never follow untrusted symlinks.
+- The gate retains access token and attempt state only in its trusted process/protected temporary storage; verify active token, expected issuer/client/audience, trusted subject and client role again before dispatch. Reject inconsistent/missing claims. Never expose token or trust locally decoded unverified JWT claims.
+- Store pass only for the active one-operation attempt, bound to enrollment version; discard on completion, failure, timeout, logout, or revocation. No public voice state endpoint.
+- Record sanitized audit events and test outcomes; raw evidence stored privately and deleted after the agreed retention period.
+
+## 9. Workflows
+
+### 9.1 Login and verification
+
+1. Gate creates an isolated attempt, initiates supported device authorization with Keycloak and shows the verification URI and user code.
+2. User opens Keycloak, verifies displayed device code and enters username/password and fresh Google Authenticator TOTP. Dedicated authentication flow must require both, even when browser has SSO state.
+3. Gate polls the official token endpoint as specified. It validates the newly issued token through trusted introspection and checks the expected client, issuer, audience, subject, roles and expiry; no valid identity = deny.
+4. Gate captures fresh audio using its own recorder, obtains that subject's active reference, validates format and invokes the pinned native binary/model with configured threshold.
+5. Only explicit successful same-speaker result counts. Gate checks token and enrollment version remain valid and role permits the requested allowlisted operation. It performs the operation itself and closes the attempt. Failure anywhere denies access.
+
+### 9.2 Enrollment
+
+After supervised identity check and approval by a fully verified administrator, an authenticated user (password + TOTP) records their own reference. Gate validates and stores it against trusted subject, consumes approval and records audit metadata. Initial admin enrollment uses documented supervised offline bootstrap. Enrollment is not protected-resource access and must not set a voice-pass flag.
+
+### 9.3 Recovery
+
+Password/TOTP recovery follows authorized Keycloak administrator procedures; revoke sessions and require a new login with both factors, plus existing voice check. For lost/unusable voice, fully verified admin approves replacement only after documented identity evidence; old enrollment and outstanding attempt states are invalidated, then fresh enrollment is required. No routine self-service factor removal or fallback that silently reduces the number of factors.
+
+## 10. Evaluation and minimum acceptance
+
+Use `tests/test_cases.md` for the complete matrix. Test missing and wrong factors separately, direct OS bypass, authorization, token expiry, enrollment tampering, replay and system errors. The voice threshold is an experiment, not a guarantee. Record a replay outcome even if the attack succeeds. Baselines are separate isolated evaluation modes/fixtures, never a bypass in the final gate.
+
+- [ ] All project execution is on Kali, using no custom Python or Python runtime for project components.
+- [ ] Instructor accepts native external tools and shell/config integration; model runs natively with preconverted weights.
+- [ ] Password and TOTP are mandatory; no SSO/alternative grant bypass.
+- [ ] Current subject's fresh voice result is enforced before protected operations; direct access denied.
+- [ ] RBAC, approval, recovery, expiry and failure behavior tested.
+- [ ] Actual genuine/impostor/replay observations, timing, limitations and baseline comparison documented.
+- [ ] No biometric or credential material committed; report and figures match actual work.
+
+## 11. Phase 2 submission requirements (preserved from original repository)
+
+| Section | Required content | Lead |
 |---|---|---|
-| Keycloak | `http://localhost:8080` | Keycloak in Docker, local development |
-| Main backend + frontend | `http://localhost:8000` | Python FastAPI; same-origin simple frontend |
-| Internal voice API | `http://127.0.0.1:8001` | Python FastAPI + SpeechBrain |
-| Source repository | GitHub **private** repo | Feature branches / pull requests |
+| Preliminary Knowledge | ~400 words, at least 4 references, concepts and supporting studies | Omar coordinates; all contribute |
+| Proposed Model | 1,500–2,000 words; goals, stepwise flows, architecture diagram, justification, differences, components and parameters | Anas integrates; all owners contribute |
+| Simulation Results | Real setup, inputs, numbered figures/tables/screenshots, baseline, actual outcomes, analysis and limitations | Hamzeh compiles; all contribute |
 
-URLs are **local examples**, not deployment commitments. Using Docker containers may require different internal hostnames even though the browser uses `localhost`.
+Original requirements record deadline **30 November 2026**, participation by every member in all three phases, and a four-mark deduction for any phase whose reported AI-generated content percentage exceeds 20% (per phase). Verify the original handout; this redesign is a planning aid, not text to submit without team review and original work.
 
-### 7.2 Main backend endpoints
+## 12. Open decisions and feasibility gates
 
-| Method | Path | Purpose / access |
-|---|---|---|
-| `GET` | `/auth/login` | Start OIDC login; redirect to Keycloak |
-| `GET` | `/auth/callback` | Validate OIDC response and create app session |
-| `POST` | `/auth/logout` | Clear session and voice status |
-| `GET` | `/api/me` | Current logged-in account and voice status |
-| `POST` | `/api/voice/enroll` | Upload own reference sample with approval |
-| `POST` | `/api/voice/verify` | Upload fresh voice sample for current account |
-| `GET` | `/api/protected` | Requires password login + voice pass |
-| `GET` | `/api/admin` | Also requires `administrator` role |
-| `POST` | `/api/admin/users/{user_id}/approve-enrollment` | Approved administrator + checked identity evidence |
-| `POST` | `/api/admin/users/{user_id}/reset-voice` | Approved recovery, invalidate old enrollment |
-| `GET` | `/health` | Non-sensitive local health check |
+1. Instructor approval for external native tools, CMake and Bash; strict official-tool-only interpretation would block this proposal.
+2. Tested native tool build, exact release/commit/model checksum, output format, score direction, threshold and engine error behavior.
+3. Tested Keycloak device flow, mandatory fresh password/TOTP, introspection claims, confidential client setup and lab TLS.
+4. Safe local gate execution, service identity, microphone device access and no direct protected-file access. If this cannot be established, demonstrate components separately and report incomplete integration.
+5. Admin evidence and initial bootstrap procedure; retention; concurrency and throttling settings.
 
-Client audio upload: `multipart/form-data` containing **one field named `audio`**, accepting browser-supported WebM/Opus when available or WAV. The backend owns user identity from its authenticated session.
-
-Example `GET /api/me` after password login, before voice pass:
-
-```json
-{
-  "user_id": "keycloak-sub-123",
-  "username": "test_user",
-  "roles": ["regular_user"],
-  "voice_enrolled": true,
-  "voice_verified": false
-}
-```
-
-Example `POST /api/voice/verify` processed mismatch (200 does **not** mean verified):
-
-```json
-{"voice_verified": false, "message": "Voice verification failed"}
-```
-
-The backend keeps numeric similarity scores in **restricted evaluation logs**, not in the browser response by default.
-
-### 7.3 Internal voice API
-
-`POST /internal/voice/compare` — **only called by the trusted backend**. Send two `multipart/form-data` files:
-
-- `reference_audio`: enrolled reference recording, standardized WAV.
-- `attempt_audio`: fresh attempted recording, standardized WAV.
-
-Example successful response (values **illustrative only**):
-
-```json
-{
-  "matched": true,
-  "score": 0.82,
-  "threshold": 0.70,
-  "model": "speechbrain/spkrec-ecapa-voxceleb"
-}
-```
-
-The service doesn't need Keycloak roles, account IDs or session IDs. The main backend chooses the correct reference file and binds the result to the active session.
-
-### 7.4 Audio preparation
-
-| Parameter | Proposed agreement |
-|---|---|
-| Browser formats | WebM/Opus or WAV, as supported |
-| Internal format | WAV, signed 16-bit PCM |
-| Sample rate | **16,000 Hz** |
-| Channels | **Mono (1)** |
-| Recording duration | **3–10 seconds**, provisional demo rule |
-| Upload limit | **10 MB**, provisional safety limit |
-| Model | `speechbrain/spkrec-ecapa-voxceleb` |
-| Audio conversion owner | Main backend (Anas) |
-| Model comparison owner | Voice API (Yousef) |
-
-Member 2 should **not** need to write custom resampling code in the browser. Member 4 normalizes accepted recordings before calling the internal service. Member 3 validates normalized inputs.
-
-### 7.5 Error handling
-
-| Status | Meaning |
-|---|---|
-| `200` | Request processed (a voice mismatch can still be `200` with `voice_verified=false`) |
-| `201` | New voice enrollment completed |
-| `302` | Browser redirect in OIDC flow |
-| `400` / `415` | Bad or unsupported recording |
-| `401` | No valid authenticated session |
-| `403` | Voice check missing or insufficient role/approval |
-| `409` | Invalid workflow state; e.g. voice not enrolled |
-| `413` | Upload exceeds limit |
-| `429` | Too many attempts |
-| `503` | Internal voice service unavailable; **fail closed** |
-
-Error JSON envelope:
-
-```json
-{"error": {"code": "VOICE_NOT_ENROLLED", "message": "Voice enrollment is required before verification."}}
-```
-
-## 8. Data and state design (proposed)
-
-- **Identity:** Keycloak stores accounts, passwords, roles. Backend uses the validated OIDC `sub` as its stable account key.
-- **Enrollment record:** `keycloak_sub`, `enrollment_version`, restricted `reference_path_or_template`, `approved_by`, `approved_at`, `active`.
-- **Application session:** unguessable server-side `session_id`, `keycloak_sub`, authentication state, `voice_verified` and optional timestamp/enrollment version; cookie is HttpOnly with appropriate Secure/SameSite configuration.
-- **Audit event:** action, actor, target account, time, identity-evidence category, outcome. Do not log passwords, live tokens, unredacted sensitive evidence or biometric raw data in routine audit logs.
-- **Test record:** test ID, input category, expected decision, observed outcome, selected threshold/version, timing and notes.
-
-**Storage choice is open:** a small local SQLite database is a reasonable prototype option, but is **not** specified in Phase 1. Agree on it explicitly rather than creating overlapping databases in different components.
-
-## 9. Main workflows
-
-### 9.1 Login and voice verification
-
-1. Browser starts `/auth/login`; Keycloak authenticates username/password.
-2. Main backend validates OIDC callback and establishes a password-authenticated session with `voice_verified=false`.
-3. Browser calls `/api/me` and shows the voice step if enrolled.
-4. Browser records and uploads fresh audio to `/api/voice/verify`.
-5. Backend retrieves the **currently authenticated account's** active reference recording and converts files to the agreed format.
-6. Backend calls the internal voice comparison endpoint and receives `matched` + score.
-7. Backend stores the trusted pass/fail result **for this session only**; numeric scores remain in restricted testing records.
-8. Backend allows `/api/protected` only for current voice-pass sessions; `/api/admin` additionally checks `administrator` role.
-9. Logout, a new login, expired session, or approved voice reset clears applicable voice-pass state.
-
-### 9.2 Initial enrollment
-
-1. Identity is verified through a supervised administrator procedure.
-2. Backend records a short-lived, account-specific enrollment approval.
-3. Authenticated user uploads **their own** reference audio via `/api/voice/enroll`.
-4. Backend validates and stores the reference against trusted Keycloak `sub`; pending approval is consumed.
-
-### 9.3 Password reset and voice replacement
-
-- **Password reset:** Keycloak or approved identity process handles reset; no automatic change to role or reference voice; next protected access still requires voice verification.
-- **Lost/failed voice:** an authorized administrator verifies claimant evidence; backend records approval, invalidates old enrollment and affected voice sessions, then requires fresh enrollment.
-- **Unknown evidence policy:** exact acceptable evidence and the initial admin bootstrap **must be decided and documented** before implementation; no unsupervised self-reset bypass.
-
-## 10. Required evaluation scenarios
-
-| Test ID | Scenario | Expected security decision |
-|---|---|---|
-| T-01 | Correct password + current enrolled speaker | Protected access allowed if score passes threshold |
-| T-02 | Wrong password | Login denied |
-| T-03 | Correct password, no voice attempt | Protected access denied |
-| T-04 | Correct password, nonmatching speaker | Protected access denied if similarity falls below threshold |
-| T-05 | Direct request to protected route without session | Deny |
-| T-06 | Matching voice but role `regular_user` requests admin route | Deny |
-| T-07 | Matching voice and `administrator` role requests admin route | Allow |
-| T-08 | Another account's reference audio / tampered client user ID | Deny; cannot change trusted account association |
-| T-09 | Voice service down/timeout | Deny; no bypass |
-| T-10 | Previous session's valid voice pass used in new session | Deny pending new voice pass |
-| T-11 | Password reset | Role and voice-enrollment requirement preserved |
-| T-12 | Voice replacement without admin identity verification | Deny |
-| T-13 | Approved voice replacement | Old enrollment invalidated; new enrollment required |
-| T-14 | Replayed recording of enrolled speaker | **Observe and report** whether speaker verifier accepts/rejects; no promised anti-replay result |
-| T-15 | Voice imitation or synthetic sample, if safely available | **Observe and report**; not a guaranteed detection feature |
-| T-16 | Corrupt, unsupported or oversized audio | Clear error; no voice pass |
-
-Member 5 should label tables **Expected** vs **Observed** and fill Observed only from actual testing. Recommended evaluation: number of matching/nonmatching attempts, confusion matrix, False Acceptance Rate (FAR), False Rejection Rate (FRR), processing time, replay-test outcomes, and limitations. If a baseline is used (for example password-only access vs proposed two-step workflow), compare **observable access decisions**, not unsupported claims of practical security superiority.
-
-## 11. Phase 2 submission requirements (from instructor handout)
-
-| Section | Required content | Documentation lead |
-|---|---|---|
-| **Preliminary Knowledge** | **~400 words**, at least **4 references**; concise technologies, concepts, supporting studies | Omar coordinates; everyone contributes |
-| **Proposed Model** | **1,500–2,000 words**; overview, goals, detailed step-by-step flows, important **architecture diagram**, justification, differences from existing approaches, components and parameters | Anas integrates; all component owners write their sections |
-| **Simulation Results** | Real setup and inputs; numbered, labeled charts/tables/screenshots; observed results; comparison to baseline or prior model; analysis and limitations | Hamzeh compiles; all owners contribute evidence |
-
-**Deadline:** 30 November 2026. The instructor requires **every student to participate and contribute to all three phases**, and specifies a 4-mark deduction for any phase whose reported AI-generated content percentage exceeds 20% (assessed separately per phase). Documentation must accurately describe actual work, with source attribution and no invented experiments.
-
-## 12. Minimum project acceptance checklist
-
-- [ ] Reproducible Keycloak setup with two test roles and documented app client.
-- [ ] Password login works, but password-only session **cannot** open protected routes.
-- [ ] Browser can capture/upload audio and clearly handle errors.
-- [ ] Pretrained SpeechBrain model can compare two test recordings.
-- [ ] Trusted backend records the current session's voice result; client cannot forge it.
-- [ ] RBAC prevents verified regular user from calling administrator operation.
-- [ ] Enrollment requires verified approval; voice reset invalidates old enrollment.
-- [ ] At least matching, nonmatching, replay and role-bypass test results are recorded truthfully.
-- [ ] Required Phase 2 figures, references, analysis and limitations are completed.
-- [ ] Repository contains **no raw voice recordings, biometric embeddings, passwords or secrets**.
-
-## 13. Open decisions to resolve before implementation
-
-1. Final Keycloak and Python/package versions; integration/OS environment.
-2. Session-store mechanism and whether backend uses SQLite or a small file-backed store.
-3. Exact identity-evidence procedure for initial enrollment and voice replacement (including first-admin bootstrap).
-4. Calibrated decision threshold and evaluation recording split.
-5. Final validation limits for audio length, file size, and allowed formats.
-6. Whether a separate explicit anti-spoofing detector is excluded (recommended for Phase 2: **exclude**, test replay exposure only).
-
-**Source basis:** `Phase1_Group1_Voice_Verification.pdf` (latest Phase 1), `Phase 2 - Updated (1).docx` (instructor's Phase 2 requirements), and preliminary `voice_project_shared_contract_v0.1.md` (team-proposed API implementation agreement). Source requirements and proposed implementation decisions have been identified separately above.
+Source basis: original repository requirements and team documents (23 November 2026), prior Phase 1 report/Phase 2 handout cited there (not independently retrieved), and revised user direction. External technical references: [Keycloak admin guide](https://www.keycloak.org/docs/latest/server_admin/), [OIDC endpoints and grants](https://www.keycloak.org/securing-apps/oidc-layers), [voice-detect.cpp](https://github.com/localai-org/voice-detect.cpp), [preconverted weights](https://huggingface.co/mudler/voice-detect-gguf), [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html).
