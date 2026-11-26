@@ -4,7 +4,7 @@
   "description": "Private Human-based face verification module for the MFA security system",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node scripts/test-detection.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +14,7 @@
     "@tensorflow/tfjs-backend-wasm": "4.22.0",
     "@tensorflow/tfjs-converter": "4.22.0",
     "@tensorflow/tfjs-core": "4.22.0",
-    "@vladmandic/human": "3.3.6"
+    "@vladmandic/human": "3.3.6",
+    "jpeg-js": "0.4.4"
   }
 }
