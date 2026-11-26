@@ -4,7 +4,8 @@
   "description": "Private Human-based face verification module for the MFA security system",
   "main": "index.js",
   "scripts": {
-    "test": "node scripts/test-detection.js"
+    "test": "node scripts/test-detection.js",
+    "test:comparison": "node scripts/test-comparison.js"
   },
   "keywords": [],
   "author": "",
