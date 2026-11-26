@@ -1,0 +1,19 @@
+{
+  "name": "@mfa-lab/face-verifier",
+  "version": "0.1.0",
+  "description": "Private Human-based face verification module for the MFA security system",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "private": true,
+  "dependencies": {
+    "@tensorflow/tfjs-backend-wasm": "4.22.0",
+    "@tensorflow/tfjs-converter": "4.22.0",
+    "@tensorflow/tfjs-core": "4.22.0",
+    "@vladmandic/human": "3.3.6"
+  }
+}
