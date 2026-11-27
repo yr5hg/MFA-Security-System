@@ -322,7 +322,7 @@ Sensitive configuration must be provisioned privately when importing or deployin
 - [Keycloak Overview](README.md)
 - [Authentication Flows](AUTHENTICATION_FLOWS.md)
 - [Deployment Guide](DEPLOYMENT.md)
-- [Sanitized Realm Configuration](realm-export.example.json)
+- [Sanitized Realm Configuration](realm-export.json)
 - [Keycloak Server Administration Guide](https://www.keycloak.org/docs/latest/server_admin/)
 
 The configuration values documented here reflect the exported realm settings. Runtime security behavior and end-to-end authentication enforcement are evaluated separately through the project's security test cases.
