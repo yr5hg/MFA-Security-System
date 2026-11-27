@@ -1,0 +1,13 @@
+{
+  "name": "mfa-gate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trusted MFA access-control gate",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
