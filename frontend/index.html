@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+    <title>MFA Security System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <main>
+        <h1>MFA Security System</h1>
+        <p>Select your authentication method</p>
+
+        <section id="method-selection">
+            <button id="totp-btn">
+                Password + TOTP
+            </button>
+
+            <button id="face-btn">
+                Password + Face Verification
+            </button>
+        </section>
+        <section id="face-management">
+    <h2>Face Management</h2>
+
+    <p>Enrollment and replacement require administrator
+       approval and password + TOTP authentication.</p>
+
+    <button id="enroll-btn" disabled>
+        Enroll Face
+    </button>
+
+    <button id="replace-btn" disabled>
+        Replace Face
+    </button>
+
+    <p>Demo interface - backend integration pending.</p>
+</section>
+        <section id="camera-section" hidden>
+            <h2>Face Capture</h2>
+
+            <p>Position your face in good lighting.</p>
+
+            <label>
+                <input type="checkbox" id="consent">
+                I consent to camera capture.
+            </label>
+
+            <video id="preview" autoplay
+                   playsinline muted></video>
+
+            <canvas id="canvas" hidden></canvas>
+
+            <button id="start-camera">Start Camera</button>
+            <button id="capture-btn" disabled>Capture</button>
+            <button id="cancel-btn">Cancel</button>
+
+            <p id="status" role="status"></p>
+        </section>
+    </main>
+
+    <script src="js/mock-api.js"></script>
+<script src="js/camera.js"></script>
+</body>
+</html>
