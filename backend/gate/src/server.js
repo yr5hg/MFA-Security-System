@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
+import { loadOidcClients } from './oidc.js';
 
 try {
     const config = loadConfig();
@@ -13,7 +14,18 @@ try {
         minVersion: 'TLSv1.2'
     };
 
-    const server = createApp({ tls });
+    console.log('Initializing Keycloak OIDC clients...');
+
+    const clients = await loadOidcClients(config);
+
+    console.log('TOTP OIDC client initialized');
+    console.log('Face OIDC client initialized');
+
+    const server = createApp({
+        tls,
+        config,
+        clients
+    });
 
     server.requestTimeout = 15000;
     server.headersTimeout = 10000;
@@ -32,11 +44,16 @@ try {
             console.log('MFA gate started successfully');
             console.log(`Origin: ${config.gateOrigin}`);
             console.log(`Process UID: ${process.getuid()}`);
-            console.log('Authentication integration pending');
+            console.log('OIDC authentication initialized');
+            console.log('Protected operations remain disabled');
         }
     );
 
 } catch (error) {
-    console.error('Gate startup failed:', error.message);
+    console.error(
+        'Gate startup failed:',
+        error.cause?.code ?? error.code ?? error.name
+    );
+
     process.exitCode = 1;
 }
