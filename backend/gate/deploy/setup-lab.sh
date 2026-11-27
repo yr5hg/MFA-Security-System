@@ -55,19 +55,7 @@ chmod 640 "$RESOURCE"
 
 echo "Installing trusted backend files..."
 
-install -d -m 755 \
-    -o root -g root \
-    "$INSTALL_DIR" "$INSTALL_DIR/src"
-
-install -m 644 -o root -g root \
-    "$GATE_DIR/package.json" \
-    "$INSTALL_DIR/package.json"
-
-for file in app.js config.js session.js attempt.js server.js; do
-    install -m 644 -o root -g root \
-        "$GATE_DIR/src/$file" \
-        "$INSTALL_DIR/src/$file"
-done
+bash "$GATE_DIR/deploy/update-gate.sh"
 
 echo "Preparing temporary HTTPS test certificate..."
 
