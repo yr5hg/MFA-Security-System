@@ -1,16 +1,17 @@
-
 # Integration contract
 
 **Proposed revision 0.6 · 25 November 2026 · Phase 2**
 
 This document defines the minimum integration agreement for the team's Kali Linux demonstration. It is a plan, not evidence that the endpoints are implemented or tested. The browser, Keycloak, Node.js gate and private Human verifier are intended to run in the Kali lab. No Python or external face-verification API is required.
 
+**Current Kali lab status (Omar):** The realm already created in Keycloak is `multi-factor-authentication`; its current development URL is `http://127.0.0.1:8080/realms/multi-factor-authentication`. The HTTPS issuer below is the **planned integration endpoint** and is not confirmed live. Anas must implement and test the callback routes before the team can claim they work.
+
 ## 1. Components and access rules
 
-| Item | Agreement |
+| **Item** | **Agreement** |
 |---|---|
 | Application | `https://gate.test:8444` — browser UI, backend gate and protected routes on one origin. |
-| Keycloak | `https://id.test:8443/realms/mfa-lab` — local lab identity provider with trusted HTTPS. |
+| Keycloak | `https://id.test:8443/realms/multi-factor-authentication` — local lab identity provider with trusted HTTPS. |
 | Clients | `gate-totp` and `gate-face`, confidential clients with separate callback URLs and protected secrets. |
 | Resource audience | Keep `lab-resource` as the protected-operation audience label; this does not create another running service. |
 | Identity | Verified Keycloak issuer (`iss`) and account ID (`sub`); never trust a username sent by the browser. |
@@ -22,7 +23,7 @@ The protected lab resource is owned by the gate; `lab-resource` is an audience l
 
 ## 2. Browser-to-gate interfaces
 
-| Interface | Input | Required behavior |
+| **Interface** | **Input** | **Required behavior** |
 |---|---|---|
 | `POST /attempts` | `method` (`totp` or `face`) and `action` | Create a new short-lived attempt, cancel any previous attempt, and redirect to the matching Keycloak login. |
 | `GET /oidc/totp/callback` | Keycloak authorization response | Check session and `state`, exchange code, validate signed identity and required password + OTP evidence. |
@@ -49,7 +50,7 @@ Keycloak handles passwords and TOTP; the gate does not receive either one. Store
 
 ## 4. Camera and private face verifier · Sara and Yousef
 
-| Step | Agreement |
+| **Step** | **Agreement** |
 |---|---|
 | Camera | Browser asks permission, previews the face, captures one JPEG, and stops the webcam on completion, cancellation or error. |
 | Input | Maximum **1 MiB** per JPEG. Validate type, byte size and decoded image dimensions on the server. |
@@ -83,7 +84,7 @@ The browser never decides whether the face matched. The backend chooses the refe
 
 ## 7. Outcomes and acceptance
 
-| HTTP | Outcome |
+| **HTTP** | **Outcome** |
 |---|---|
 | `200` / `201` / `204` | Successful authorized result for the requested endpoint only. |
 | `303` | Redirect to Keycloak or an application status page; no resource access by itself. |
@@ -93,7 +94,7 @@ The browser never decides whether the face matched. The backend chooses the refe
 | `429` | Too many attempts; apply retry limits. |
 | `503` | Required service unavailable; protected operation is denied. |
 
-**Minimum integrated demonstration:** password + TOTP succeeds, password + face succeeds, password-only fails, a wrong role is denied, and a failed face match never releases the resource. Test account disablement, replay, cancellation and camera failures. Mark tests `Pending` until executed on Kali and record sanitized evidence in [test_cases.md](../test_cases.md).
+**Minimum integrated demonstration:** password + TOTP succeeds, password + face succeeds, password-only fails, a wrong role is denied, and a failed face match never releases the resource. Test account disablement, replay, cancellation and camera failures. Mark tests `Pending` until executed on Kali and record sanitized evidence in [test_cases.md](https://github.com/yr5hg/MFA-Security-System/blob/main/test_cases.md).
 
 ## References
 
