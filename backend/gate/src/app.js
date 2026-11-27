@@ -1,4 +1,5 @@
-import { createServer } from 'node:http';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 
 function sendJson(res, status, body) {
     res.writeHead(status, {
@@ -10,8 +11,8 @@ function sendJson(res, status, body) {
     res.end(JSON.stringify(body));
 }
 
-export function createApp() {
-    return createServer((req, res) => {
+export function createApp({ tls = null } = {}) {
+    function handler(req, res) {
         if (req.method === 'GET' && req.url === '/health') {
             return sendJson(res, 200, {
                 status: 'ok',
@@ -32,5 +33,9 @@ export function createApp() {
         return sendJson(res, 404, {
             error: 'not_found'
         });
-    });
+    }
+
+    return tls
+        ? createHttpsServer(tls, handler)
+        : createHttpServer(handler);
 }
