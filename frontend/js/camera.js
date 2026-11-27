@@ -10,9 +10,11 @@ const status = document.getElementById("status");
 
 let stream = null;
 let generation = 0;
-
+let cameraTimer = null;
+const CAMERA_TIMEOUT_MS = 60000;
 function stopCamera() {
-    generation++;
+                 clearTimeout(cameraTimer);
+    cameraTimer = null; generation++;
 
     if (stream) {
         stream.getTracks().forEach(track => track.stop());
@@ -43,8 +45,25 @@ startBtn.addEventListener("click", async () => {
     }
 
     stopCamera();
+
+    if (!window.isSecureContext ||
+        !navigator.mediaDevices?.getUserMedia) {
+        stopCamera();
+        status.textContent =
+            "Camera requires a secure browser context.";
+        return;
+    }
+
     const request = generation;
     startBtn.disabled = true;
+    cameraTimer = setTimeout(() => {
+    stopCamera();
+    consent.checked = false;
+
+    status.textContent =
+        "Camera session expired. Please provide consent and retry.";
+
+}, CAMERA_TIMEOUT_MS);
 
     try {
         const newStream = await navigator.mediaDevices.getUserMedia({
@@ -58,7 +77,16 @@ startBtn.addEventListener("click", async () => {
         }
 
         stream = newStream;
-        preview.srcObject = stream;
+        preview.srcObject = stream;stream.getVideoTracks().forEach(track => {
+    track.addEventListener("ended", () => {
+        if (request !== generation) return;
+
+        stopCamera();
+
+        status.textContent =
+            "Camera disconnected. Please reconnect and retry.";
+    });
+});
         status.textContent = "Camera is ready.";
 
     } catch (error) {

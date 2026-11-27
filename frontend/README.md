@@ -62,3 +62,57 @@ FR-06, FR-09, NFR-02, NFR-07
 
 Component tests provide partial acceptance evidence.
 Full integrated security tests remain pending.
+
+
+## Additional Frontend Improvements
+
+- Camera disconnection handling.
+- Automatic 60-second camera timeout.
+- Late camera permission handling.
+- Improved face positioning instructions.
+- Consent withdrawal and camera cleanup.
+- Secure browser context validation.
+- Biometric privacy interface.
+- API error feedback preparation.
+- Face API client preparation.
+
+## Automated Tests
+
+Run from the repository root:
+
+    node --test frontend/tests/*.test.cjs
+
+Observed results (27 November 2026):
+
+- Mock API tests: 8/8 passed.
+- API feedback tests: 10/10 passed.
+- API client tests: 11/11 passed.
+- Total: 29 passed, 0 failed.
+
+## Additional Manual Tests
+
+- Camera disconnection: PASS.
+- Camera timeout: PASS.
+- Permission timeout: PASS.
+- Consent withdrawal: PASS.
+- Page refresh and closure cleanup: PASS.
+- Secure localhost camera access: PASS.
+- Insecure context rejection: Not tested.
+
+## Integration Handoff
+
+Prepared endpoints:
+
+- GET /attempts/current
+- POST /face/verify
+- POST /face/enroll
+
+The API client is not connected to the live UI yet.
+Request encoding, CSRF fields, challenge format,
+and response schemas require backend coordination.
+
+Real authentication, face matching, enrollment approval,
+biometric deletion and protected access remain pending.
+
+All automated tests are component-level tests.
+They do not establish complete system security.

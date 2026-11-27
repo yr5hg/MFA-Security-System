@@ -38,10 +38,47 @@
 
     <p>Demo interface - backend integration pending.</p>
 </section>
-        <section id="camera-section" hidden>
+
+<section id="privacy-section">
+    <h2>Biometric Privacy</h2>
+
+    <p>
+        Camera access requires your consent.
+        You can withdraw consent at any time.
+    </p>
+
+    <p>
+        This demo does not permanently store
+        or upload facial images.
+    </p>
+
+    <button id="delete-face-btn" disabled>
+        Request Face Data Deletion
+    </button>
+
+    <p>
+        Face data deletion requires backend integration.
+    </p>
+</section>
+
+<section id="camera-section" hidden>
             <h2>Face Capture</h2>
 
-            <p>Position your face in good lighting.</p>
+            <p>For a clear facial capture:</p>
+
+<ul>
+    <li>Make sure only one face is visible.</li>
+    <li>Position your face in the center.</li>
+    <li>Look directly at the camera.</li>
+    <li>Ensure good and even lighting.</li>
+    <li>Keep your face unobstructed.</li>
+    <li>Remain still while capturing.</li>
+</ul>
+
+<p>
+    Camera access stops automatically after 60 seconds.
+    You can withdraw consent or cancel at any time.
+</p>
 
             <label>
                 <input type="checkbox" id="consent">
