@@ -1,0 +1,27 @@
+[Unit]
+Description=Trusted MFA Access Control Gate
+After=network.target
+
+[Service]
+Type=simple
+User=mfa-gate
+Group=mfa-gate
+
+WorkingDirectory=/opt/mfa-lab/gate
+EnvironmentFile=/etc/mfa-lab/gate-smoke.env
+
+ExecStart=/usr/bin/node /opt/mfa-lab/gate/src/server.js
+
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/mfa-lab
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
