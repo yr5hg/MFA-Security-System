@@ -4,7 +4,7 @@
 **Version:** Draft v0.5 (revised 25 November 2026)  
 **Phase:** Information Systems Security — Phase 2, due **30 November 2026**  
 **Status:** Proposed requirements, not evidence of complete implementation.  
-**Companions:** [TEAM_RESPONSIBILITIES.md](TEAM_RESPONSIBILITIES.md), [api.md](contracts/api.md), [architecture.md](docs/architecture.md), [test_cases.md](test_cases.md).
+**Companions:** [TEAM_RESPONSIBILITIES.md](TEAM_RESPONSIBILITIES.md), [api.md](contracts/api.md), [architecture.md](architecture.md), [test_cases.md](test_cases.md).
 
 ## 1. Project overview
 
