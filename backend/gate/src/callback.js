@@ -111,7 +111,8 @@ export async function handleOidcCallback({
     sessionToken,
     method,
     callbackUrl,
-    exchangeCode = oidc.authorizationCodeGrant
+    exchangeCode = oidc.authorizationCodeGrant,
+    verifyEvidence = null
 }) {
     if (!['totp', 'face'].includes(method)) {
         throw new Error('Unsupported callback method');
@@ -189,7 +190,17 @@ export async function handleOidcCallback({
             throw new Error('Required tokens missing');
         }
 
-        // Recheck after the asynchronous token exchange.
+        const evidence = verifyEvidence
+            ? await verifyEvidence({
+                status: 'identity_validated',
+                attempt,
+                identity,
+                claims,
+                accessToken: tokens.access_token
+            })
+            : null;
+
+        // Recheck after all asynchronous validation.
         if (
             sessions.get(sessionToken)?.id !== session.id ||
             !attempts.isClaimCurrent(
@@ -228,6 +239,7 @@ export async function handleOidcCallback({
             accessToken: tokens.access_token,
             idToken: tokens.id_token,
 
+            evidence,
             status: 'identity_validated',
             authorized: false
         };
