@@ -97,7 +97,7 @@ Observed results (27 November 2026):
 - Consent withdrawal: PASS.
 - Page refresh and closure cleanup: PASS.
 - Secure localhost camera access: PASS.
-- Insecure context rejection: Not tested.
+- Insecure context rejection: PASS (simulated via Firefox Web Console). Camera blocked, security message displayed, and Capture button remained disabled.
 
 ## Integration Handoff
 
