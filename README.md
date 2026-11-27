@@ -189,12 +189,11 @@ See [Team Responsibilities](TEAM_RESPONSIBILITIES.md) for detailed tasks, handof
 | [PROJECT_REQUIREMENTS.md](PROJECT_REQUIREMENTS.md) | Functional, non-functional and security requirements |
 | [TEAM_RESPONSIBILITIES.md](TEAM_RESPONSIBILITIES.md) | Team assignments, implementation tasks, handoffs and roadmap |
 | [contracts/api.md](contracts/api.md) | Proposed interface contracts and trust boundaries |
-| [docs/KALI_SETUP.md](docs/KALI_SETUP.md) | Kali Linux environment setup and implementation guidance |
-| [docs/architecture.md](docs/architecture.md) | Detailed architecture, authentication flows and diagrams |
+| [KALI_SETUP.md](KALI_SETUP.md) | Kali Linux environment setup and implementation guidance |
+| [architecture.md](architecture.md) | Detailed architecture, authentication flows and diagrams |
 | [test_cases.md](test_cases.md) | Expected versus observed security test matrix |
 | [REQUIREMENTS_TRACEABILITY.md](REQUIREMENTS_TRACEABILITY.md) | Requirements, component ownership and acceptance-test mapping |
 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | Verified progress, pending work and known limitations |
-| [docs/phase2/README.md](docs/phase2/README.md) | Phase 2 deliverables and reporting information |
 | `keycloak/` | Keycloak configuration and authentication setup |
 | `frontend/` | Browser interface and camera capture |
 | `backend/` | Private face verifier, trusted gate and protected operations |
