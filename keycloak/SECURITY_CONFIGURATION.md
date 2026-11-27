@@ -2,285 +2,327 @@
 
 ## 1. Overview
 
-The MFA Security System uses centralized Keycloak security policies to protect user credentials, authentication sessions, and token-based access.
+Keycloak provides centralized security configuration for the `multi-factor-authentication` realm.
 
-The security configuration covers password requirements, TOTP verification, brute-force protection, session restrictions, token management, role-based access control, and security event logging.
+The configured security controls cover password requirements, TOTP verification, brute-force protection, session management, token security, role-based access control, and security event logging.
 
-All policies apply to the `multi-factor-authentication` realm unless explicitly overridden at the client level.
+This document reflects the actual realm configuration exported from Keycloak 26.8.2.
 
 ## 2. Password Policy
 
-Password requirements reduce the likelihood of users selecting easily guessable credentials.
+The password policy establishes credential requirements and password expiration rules.
 
-| Policy | Configuration Baseline |
+| Policy | Configured Value |
 |---|---|
-| Minimum Password Length | 12 characters |
-| Uppercase Characters | At least 1 |
-| Lowercase Characters | At least 1 |
-| Numerical Digits | At least 1 |
-| Special Characters | At least 1 |
+| Minimum Password Length | 8 characters |
+| Minimum Uppercase Characters | 1 |
+| Minimum Numerical Digits | 1 |
+| Minimum Special Characters | 1 |
 | Not Username | Enabled |
+| Password Expiration | 365 days |
 
-Passwords must satisfy the configured policy when created or updated.
+Users must satisfy the configured password requirements when creating or updating their passwords.
 
-The policy does not require unnecessary changes to existing credentials. Existing passwords must be updated separately if compliance with a newly applied policy is required.
+Passwords expire after 365 days, requiring users to update their credentials.
+
+The configured policy prevents users from selecting their username as their password.
 
 ## 3. TOTP Policy
 
-Time-based one-time passwords provide an additional authentication factor based on possession of an enrolled authenticator.
+Time-Based One-Time Password authentication provides a possession-based second authentication factor.
 
-| Setting | Value |
+| Setting | Configured Value |
 |---|---|
 | OTP Type | TOTP |
+| OTP Algorithm | HmacSHA1 |
 | Number of Digits | 6 |
 | Token Period | 30 seconds |
+| Look-Ahead Window | 1 |
 | Reusable Code | Disabled |
 
-The authenticator generates a new code every 30 seconds. Successfully consumed codes cannot be reused.
+The authenticator generates a six-digit code every 30 seconds.
 
-TOTP enrollment secrets must remain private. Existing enrollment parameters are preserved to maintain compatibility with registered authenticator applications.
+The configured look-ahead window accommodates limited time differences between the authenticator and the identity provider.
+
+Successfully consumed OTP codes cannot be reused.
+
+Supported authenticator applications include:
+
+- FreeOTP.
+- Google Authenticator.
+- Microsoft Authenticator.
+
+OTP enrollment secrets must remain confidential and must not be included in repository configuration files.
 
 ## 4. Brute-Force Protection
 
-Brute-force protection limits repeated authentication failures and reduces the effectiveness of automated credential guessing.
-
 ### 4.1 Configuration
 
-| Setting | Value |
+Brute-force detection restricts repeated authentication failures through temporary account lockouts.
+
+| Setting | Configured Value |
 |---|---|
+| Brute-Force Detection | Enabled |
 | Brute Force Mode | Lockout temporarily |
+| Permanent Lockout | Disabled |
 | Maximum Login Failures | 6 |
 | Maximum Secondary Authentication Failures | 0 |
-| Wait Time Strategy | Multiple |
+| Wait Time Strategy | Linear |
 | Wait Increment | 30 minutes |
-| Maximum Wait | 30 minutes |
-| Failure Reset Time | 30 minutes |
+| Maximum Wait | 60 minutes |
+| Failure Reset Time | 60 minutes |
 | Quick Login Check | 1000 milliseconds |
 | Minimum Quick Login Wait | 1 minute |
 
-### 4.2 Account Lockout Behavior
+### 4.2 Lockout Behavior
 
-```mermaid
-flowchart TD
-    A[Authentication Attempt] --> B{Authentication Successful?}
-    B -->|Yes| C[Reset Failure Counter]
-    B -->|No| D[Record Authentication Failure]
-    D --> E{Failure Threshold Reached?}
-    E -->|No| F[Allow Another Attempt Unless Temporarily Locked]
-    E -->|Yes| G[Temporary Account Lockout]
-    G --> H[30 Minute Lockout]
-    H --> I[Account Becomes Eligible for Authentication]
-    I --> A
-```
+The configured policy applies temporary restrictions to repeated failed authentication attempts.
 
-The configured policy targets the following behavior:
+- The configured failure threshold is six attempts.
+- The wait increment is 30 minutes.
+- The maximum temporary waiting period is 60 minutes.
+- The failure reset interval is 60 minutes.
+- Rapid consecutive failures may trigger the minimum one-minute waiting period.
+- Permanent account lockout is disabled.
 
-- Six failed authentication attempts trigger a temporary account lockout.
-- The normal lockout duration is 30 minutes.
-- Failure counters become eligible for reset after the configured inactivity period.
-- Rapid authentication attempts may trigger an earlier one-minute lockout.
-- Successful authentication resets the applicable failure counter.
-- Permanent account lockout is not part of the selected policy.
+The maximum secondary authentication failures value is zero, meaning that no additional permanent secondary-authentication failure threshold is configured.
 
-The maximum secondary authentication failures setting is zero to avoid enabling an additional permanent lockout threshold.
+The exact lockout behavior depends on the failure counter and timing of authentication attempts.
 
-The built-in protection applies to supported password and OTP authenticators. External face verification uses separate backend-controlled failure restrictions.
+Keycloak brute-force protection applies to supported password and OTP authentication executions. External facial verification failures are controlled separately by the application.
 
-The exact reset and lockout behavior must be evaluated against the deployed Keycloak version.
+## 5. Session Security
 
-## 5. Face Verification Protection
+Session policies restrict the duration of authenticated sessions and incomplete authentication processes.
 
-Face verification is performed outside Keycloak using the local Human-based verification component.
+### 5.1 Standard Sessions
 
-The application gate controls authentication attempts and applies independent restrictions to repeated biometric verification failures.
-
-| Setting | Value |
-|---|---|
-| Failed Verification Limit | 3 |
-| Failure Window | 300 seconds |
-| Cooldown Period | 300 seconds |
-| Capture Challenge Lifetime | 60 seconds |
-| Inference Timeout | 10,000 milliseconds |
-| Maximum Capture Size | 1,048,576 bytes |
-
-Face comparison results must originate from the trusted local verification component.
-
-A browser-generated success message is not sufficient authentication evidence.
-
-The similarity threshold must be calibrated using experimental evaluation. Facial comparison alone does not establish reliable liveness or resistance to presentation attacks.
-
-## 6. Session Security
-
-Session restrictions limit how long authenticated sessions remain usable.
-
-### 6.1 Standard Sessions
-
-| Setting | Value |
+| Setting | Configured Value |
 |---|---|
 | SSO Session Idle | 15 minutes |
 | SSO Session Max | 1 hour |
 | Client Session Idle | 10 minutes |
 | Client Session Max | 30 minutes |
 
-- **Idle:** Maximum permitted inactivity before session expiration.
-- **Max:** Absolute session lifetime, regardless of activity.
+Idle timeouts restrict the permitted period of inactivity.
 
-Client-level restrictions provide shorter application sessions within the overall realm session lifetime.
+Maximum session lifetimes restrict the total duration of a session regardless of continued activity.
 
-### 6.2 Offline Sessions
+Client session restrictions provide shorter application-specific session lifetimes.
 
-| Setting | Value |
+### 5.2 Offline Sessions
+
+| Setting | Configured Value |
 |---|---|
 | Offline Session Idle | 30 days |
-| Client Offline Session Idle | 0 minutes |
+| Client Offline Session Idle | 0 |
 | Offline Session Max Limited | Enabled |
 | Offline Session Max | 30 days |
-| Client Offline Session Max | 0 minutes |
+| Client Offline Session Max | 0 |
 
-Offline sessions allow authorized applications to obtain new access tokens independently of an ordinary browser session.
+A zero client-specific timeout indicates that the corresponding realm-level offline session setting applies.
 
-A zero client-specific value inherits the applicable realm-level setting.
+Offline access should only be requested when required by the application.
 
-Offline access must not be requested unless required by the application.
+### 5.3 Authentication Time Limits
 
-### 6.3 Login Time Limits
-
-| Setting | Value |
+| Setting | Configured Value |
 |---|---|
 | Login Timeout | 5 minutes |
 | Login Action Timeout | 2 minutes |
+| Client Login Timeout | 1 minute |
 
-These restrictions prevent incomplete authentication processes from remaining valid indefinitely.
+These time limits restrict the validity of incomplete authentication processes, individual authentication actions, and authorization code exchanges.
 
-## 7. Token Security
+## 6. Token Security
 
-### 7.1 Token Configuration Baseline
+### 6.1 Token Configuration
 
-| Setting | Value |
+| Setting | Configured Value |
 |---|---|
-| Signature Algorithm | RS256 |
+| Default Signature Algorithm | RS256 |
 | Access Token Lifespan | 5 minutes |
 | Revoke Refresh Token | Enabled |
 | Refresh Token Max Reuse | 0 |
-| Client Login Timeout | 1 minute |
 
-Digitally signed tokens provide verifiable authentication and authorization information.
+RS256 provides digitally signed tokens whose authenticity and integrity can be verified using the identity provider's public signing keys.
 
-Short-lived access tokens reduce the exposure period of compromised tokens. Refresh token rotation reduces the opportunity to reuse previously exchanged refresh tokens.
+The five-minute access token lifetime reduces the exposure period of compromised access tokens.
 
-### 7.2 Token Validation
+Refresh token rotation is enabled, with a maximum reuse value of zero. Applications must retain the latest refresh token returned after a successful refresh operation.
 
-The application validates the applicable token properties before allowing protected operations.
+### 6.2 Client-Level Token Security
 
-| Validation | Purpose |
+Both `gate-totp` and `gate-face` use the following configuration:
+
+| Setting | Configured Value |
 |---|---|
-| Signature | Verify token authenticity and integrity |
-| Issuer | Verify the trusted Keycloak realm |
-| Audience | Verify the intended resource |
-| Expiration | Reject expired tokens |
-| Client Identity | Verify the selected authentication client |
-| Authentication Evidence | Verify the required authentication methods |
-| Roles | Determine permitted operations |
-| Active Token Status | Reject invalidated or inactive authentication |
+| Client Authentication | Enabled |
+| Client Authenticator | Client Secret |
+| Standard Flow | Enabled |
+| PKCE | S256 |
+| Implicit Flow | Disabled |
+| Direct Access Grants | Disabled |
+| Service Accounts | Disabled |
+| Refresh Tokens | Enabled |
+| Lightweight Access Tokens | Disabled |
 
-Refresh token handling must preserve the latest valid token when rotation is enabled.
+The Authorization Code Flow and PKCE protect the authorization code exchange.
 
-Token renewal does not create a new completed MFA attempt or authorize a new protected operation independently.
+Disabling unused authentication grants reduces unnecessary authentication paths for the two application clients.
 
-## 8. Role-Based Access Control
+Authentication Method Reference (AMR) mappers provide information about the authentication methods completed within Keycloak.
 
-Authentication establishes user identity. Authorization determines the operations that the authenticated identity may perform.
+Detailed authentication flows and AMR configuration are documented in [AUTHENTICATION_FLOWS.md](AUTHENTICATION_FLOWS.md).
 
-| Application Role | Authorized Access |
+### 6.3 Token Validation Requirements
+
+Issued tokens must be validated by the application before protected access is authorized.
+
+Required validation includes:
+
+- Token signature.
+- Trusted issuer.
+- Token expiration.
+- Intended audience.
+- Applicable client identity.
+- Required authentication evidence.
+- Assigned application roles.
+
+The resource audience is configured as part of application integration.
+
+Successful token validation alone does not establish completion of external face verification.
+
+## 7. Role-Based Access Control
+
+Keycloak manages application role definitions and user role assignments.
+
+| Realm Role | Purpose |
 |---|---|
-| Standard User | Ordinary protected user operations |
-| Administrator | Ordinary operations and administrator-restricted operations |
+| `regular_user` | Standard application permissions |
+| `administrator` | Administrator-level application permissions |
 
-Application roles are assigned through Keycloak role mappings.
+Realm role information is included in the access token under the `realm_access.roles` claim.
 
-The application gate validates trusted role information before executing protected operations.
+The application uses trusted role information to enforce its authorization requirements.
 
-Application administrators must not receive Keycloak administration privileges unless explicitly authorized to manage the identity provider.
+The application administrator role is separate from Keycloak's built-in realm administration privileges.
 
-All protected operations require valid authentication, completed second-factor verification, and the appropriate role.
+## 8. Realm Account Settings
+
+| Setting | Configured Value |
+|---|---|
+| User Registration | Disabled |
+| Login with Email | Enabled |
+| Duplicate Emails | Disabled |
+| Remember Me | Disabled |
+| Email Verification Requirement | Disabled |
+| Self-Service Forgotten Password Reset | Disabled |
+| Username Editing | Disabled |
+
+Account creation and forgotten-password recovery are not exposed through the corresponding public Keycloak login options.
+
+The disabled forgotten-password reset option does not prevent administrator-managed credential updates or other authorized credential-management operations.
 
 ## 9. Security Event Logging
 
-Security events provide an audit trail for authentication activity and administrative changes.
-
 ### 9.1 User Events
 
-| Setting | Value |
+| Setting | Configured Value |
 |---|---|
-| Save Events | Enabled |
+| Save User Events | Enabled |
 | Event Retention | 30 days |
 | Event Listener | `jboss-logging` |
 
-Relevant authentication events include:
+Keycloak records authentication-related events to support security monitoring and investigation.
 
-| Event | Recorded Activity |
+Relevant configured events include:
+
+| Event | Description |
 |---|---|
-| LOGIN | Successful authentication |
-| LOGIN_ERROR | Failed authentication |
-| LOGOUT | Successful logout |
-| LOGOUT_ERROR | Failed logout |
-| CODE_TO_TOKEN | Authorization code exchange |
-| CODE_TO_TOKEN_ERROR | Failed authorization code exchange |
-| CLIENT_LOGIN | Successful client authentication |
-| CLIENT_LOGIN_ERROR | Failed client authentication |
-| REFRESH_TOKEN | Token renewal |
-| REFRESH_TOKEN_ERROR | Failed token renewal |
-| UPDATE_CREDENTIAL | Credential update |
-| UPDATE_CREDENTIAL_ERROR | Failed credential update |
-| RESET_PASSWORD | Password reset |
-| RESET_PASSWORD_ERROR | Failed password reset |
+| `LOGIN` | Successful authentication |
+| `LOGIN_ERROR` | Failed authentication |
+| `LOGOUT` | Successful logout |
+| `LOGOUT_ERROR` | Failed logout |
+| `CODE_TO_TOKEN` | Successful authorization code exchange |
+| `CODE_TO_TOKEN_ERROR` | Failed authorization code exchange |
+| `CLIENT_LOGIN` | Successful client authentication |
+| `CLIENT_LOGIN_ERROR` | Failed client authentication |
+| `REFRESH_TOKEN` | Successful token refresh |
+| `REFRESH_TOKEN_ERROR` | Failed token refresh |
+| `UPDATE_PASSWORD` | Password update |
+| `UPDATE_PASSWORD_ERROR` | Failed password update |
+| `UPDATE_CREDENTIAL` | Credential update |
+| `UPDATE_CREDENTIAL_ERROR` | Failed credential update |
+| `UPDATE_TOTP` | TOTP credential update |
+| `UPDATE_TOTP_ERROR` | Failed TOTP credential update |
+| `REMOVE_TOTP` | TOTP credential removal |
+| `REMOVE_TOTP_ERROR` | Failed TOTP credential removal |
+| `RESET_PASSWORD` | Password reset |
+| `RESET_PASSWORD_ERROR` | Failed password reset |
+| `USER_DISABLED_BY_TEMPORARY_LOCKOUT` | Temporary account lockout |
 
-The configured event selection supports authentication monitoring and investigation of security failures.
+The table highlights security-relevant events from the enabled event configuration rather than listing every supported event.
+
+External face verification events are managed separately by the application.
 
 ### 9.2 Administrator Events
 
-| Setting | Value |
+| Setting | Configured Value |
 |---|---|
-| Save Events | Enabled |
+| Save Admin Events | Enabled |
 | Include Representation | Disabled |
-| Retention Target | 30 days |
+| Event Retention | 30 hours |
 
-Administrator events record management operations affecting users, roles, clients, authentication flows, and realm configuration.
+Administrator events provide an audit trail for administrative operations affecting realm configuration, users, roles, clients, and authentication settings.
 
-Detailed representations are excluded to reduce unnecessary exposure of configuration data.
+Detailed operation representations are excluded to reduce unnecessary exposure of configuration data.
 
-### 9.3 Application Events
+## 10. Browser and Transport Security
 
-The application maintains separate security records for external face verification, authorization decisions, rejected protected operations, and authentication attempt consumption.
+### 10.1 Transport Security
 
-Sensitive credentials, raw facial images, biometric templates, and authentication tokens must not be included in application logs.
+| Setting | Configured Value |
+|---|---|
+| Realm SSL Requirement | External Requests |
 
-## 10. Security Enforcement
+The final integrated deployment uses HTTPS for communication between the identity provider and the application.
 
-The authentication and authorization controls operate together before a protected action is executed.
+Certificate configuration and deployment requirements are documented in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-```mermaid
-flowchart TD
-    A[Authentication Request] --> B[Validate Password]
-    B --> C[Verify Selected Second Factor]
-    C --> D[Validate Authentication Evidence]
-    D --> E[Validate Session and Token]
-    E --> F[Validate User Role]
-    F --> G[Final Authorization Check]
-    G --> H[Consume Authentication Attempt]
-    H --> I[Execute Protected Operation]
-```
+### 10.2 Browser Security Headers
 
-Failure at any required security check results in access denial.
+| Security Header | Configured Value |
+|---|---|
+| X-Content-Type-Options | `nosniff` |
+| X-Frame-Options | `SAMEORIGIN` |
+| Referrer-Policy | `no-referrer` |
+| Strict-Transport-Security | `max-age=31536000; includeSubDomains` |
+| Content-Security-Policy | `frame-src 'self'; frame-ancestors 'self'; object-src 'none';` |
 
-Each protected operation requires valid, current authentication evidence. Previously completed authentication attempts must not be reused to authorize additional operations.
+These headers restrict unauthorized framing, MIME-type sniffing, referrer information disclosure, and insecure browser connections.
 
-## 11. Configuration References
+## 11. Configuration Confidentiality
 
+The repository contains sanitized configuration and technical documentation.
+
+The following sensitive information must remain outside version control:
+
+- User passwords and credentials.
+- Client secrets.
+- TOTP enrollment secrets.
+- Access and refresh tokens.
+- Private signing and TLS keys.
+- Private user data and runtime security records.
+
+Sensitive configuration must be provisioned privately when importing or deploying the realm.
+
+## 12. Configuration References
+
+- [Keycloak Overview](README.md)
 - [Authentication Flows](AUTHENTICATION_FLOWS.md)
-- [Deployment Configuration](DEPLOYMENT.md)
-- [System Architecture](../architecture.md)
-- [Security Test Cases](../test_cases.md)
-- [Keycloak Administration Guide](https://www.keycloak.org/docs/latest/server_admin/)
+- [Deployment Guide](DEPLOYMENT.md)
+- [Sanitized Realm Configuration](realm-export.example.json)
+- [Keycloak Server Administration Guide](https://www.keycloak.org/docs/latest/server_admin/)
 
-This document defines the security configuration baseline. Actual deployment values and security behavior are verified against the realm export, application configuration, and independent test results.
+The configuration values documented here reflect the exported realm settings. Runtime security behavior and end-to-end authentication enforcement are evaluated separately through the project's security test cases.
