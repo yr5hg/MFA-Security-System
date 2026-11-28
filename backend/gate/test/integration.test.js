@@ -1866,3 +1866,424 @@ test('password-only authentication cannot create enrollment proof', async () => 
         assert.equal(current.status, 'idle');
     });
 });
+
+const APPROVAL_TARGET = 'target-account';
+
+function approvalBody(operation = 'enroll') {
+    return {
+        targetSubject: APPROVAL_TARGET,
+        operation,
+        identityChecked: true
+    };
+}
+
+async function withApproval(
+    callback,
+    enrolled = false
+) {
+    const fixture = createFaceFixture();
+
+    fixture.state.enrolled = enrolled;
+    fixture.state.version = enrolled ? 1 : 0;
+
+    const originalGet =
+        fixture.dependencies.references.get;
+
+    fixture.dependencies.references.get = identity => {
+        if (identity.subject !== APPROVAL_TARGET) {
+            return originalGet(identity);
+        }
+
+        assert.equal(
+            identity.issuer,
+            'https://id.test:8443/realms/multi-factor-authentication'
+        );
+
+        return {
+            issuer: identity.issuer,
+            subject: identity.subject,
+            version: fixture.state.version,
+
+            reference: fixture.state.enrolled
+                ? {
+                    policyVersion: FACE_POLICY_VERSION,
+                    descriptor: Array(1024).fill(1)
+                }
+                : null
+        };
+    };
+
+    await withApp(
+        app => callback(app, fixture.state),
+        {
+            enableOperations: true,
+            faceDependencies: fixture.dependencies
+        }
+    );
+}
+
+async function authenticateApprover(
+    app,
+    operation = 'enroll'
+) {
+    await app.initialize();
+
+    app.setIntrospection({
+        realm_access: {
+            roles: ['administrator']
+        }
+    });
+
+    const start = await app.post('/attempts', {
+        method: 'totp',
+        action: `approve_${operation}`,
+        targetSubject: APPROVAL_TARGET
+    });
+
+    assert.equal(start.status, 303);
+
+    const login = new URL(
+        start.headers.get('location')
+    );
+
+    const query = new URLSearchParams({
+        code: 'test-code',
+        state: login.searchParams.get('state'),
+        iss: 'https://id.test:8443/realms/multi-factor-authentication'
+    });
+
+    const callback = await app.request(
+        `/oidc/totp/callback?${query}`
+    );
+
+    assert.equal(callback.status, 303);
+
+    const current = await app.initialize();
+
+    assert.equal(current.status, 'totp_verified');
+
+    assert.equal(
+        current.action,
+        `approve_${operation}`
+    );
+}
+
+for (const operation of ['enroll', 'replace']) {
+    test(`administrator creates one-use ${operation} approval`, async () => {
+        await withApproval(async app => {
+            await authenticateApprover(app, operation);
+
+            const before = Date.now();
+
+            const response = await app.post(
+                '/factor/approvals',
+                approvalBody(operation)
+            );
+
+            assert.equal(response.status, 201);
+
+            const result = await response.json();
+
+            assert.equal(
+                result.status,
+                'approval_created'
+            );
+
+            assert.equal(
+                result.targetSubject,
+                APPROVAL_TARGET
+            );
+
+            assert.equal(result.operation, operation);
+
+            assert.ok(
+                result.expiresAt >= before + 600000
+            );
+
+            assert.ok(
+                result.expiresAt <= Date.now() + 600000
+            );
+
+            assert.equal(result.accessToken, undefined);
+            assert.equal(result.descriptor, undefined);
+            assert.equal(result.referenceVersion, undefined);
+
+            // Administrator authentication proof is consumed.
+            const replay = await app.post(
+                '/factor/approvals',
+                approvalBody(operation)
+            );
+
+            assert.equal(replay.status, 409);
+
+            const current = await app.initialize();
+
+            assert.equal(current.status, 'idle');
+
+            const execute = await app.post(
+                '/operations/execute'
+            );
+
+            assert.equal(execute.status, 409);
+
+        }, operation === 'replace');
+    });
+}
+
+test('approval endpoint enforces session origin and CSRF protection', async () => {
+    await withApproval(async app => {
+        const unauthenticated = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(unauthenticated.status, 401);
+
+        await authenticateApprover(app);
+
+        const crossOrigin = await app.post(
+            '/factor/approvals',
+            approvalBody(),
+            { Origin: 'https://untrusted.test' }
+        );
+
+        assert.equal(crossOrigin.status, 403);
+
+        const csrf = await app.post(
+            '/factor/approvals',
+            approvalBody(),
+            { 'X-CSRF-Token': 'invalid' }
+        );
+
+        assert.equal(csrf.status, 403);
+    });
+});
+
+test('ordinary administrator resource proof cannot create approval', async () => {
+    await withApproval(async app => {
+        app.setIntrospection({
+            realm_access: {
+                roles: ['administrator']
+            }
+        });
+
+        await authenticate(app, 'admin', 'totp');
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(response.status, 403);
+    });
+});
+
+test('approval request cannot change target operation or identity attestation', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app);
+
+        const wrongTarget = await app.post(
+            '/factor/approvals',
+            {
+                ...approvalBody(),
+                targetSubject: 'another-account'
+            }
+        );
+
+        assert.equal(wrongTarget.status, 403);
+
+        const wrongOperation = await app.post(
+            '/factor/approvals',
+            approvalBody('replace')
+        );
+
+        assert.equal(wrongOperation.status, 403);
+
+        for (const invalid of [
+            {
+                ...approvalBody(),
+                identityChecked: false
+            },
+
+            {
+                ...approvalBody(),
+                approvedBy: 'fake-admin'
+            },
+
+            {
+                ...approvalBody(),
+                expiresAt: Date.now() + 999999
+            }
+        ]) {
+            const response = await app.post(
+                '/factor/approvals',
+                invalid
+            );
+
+            assert.equal(response.status, 400);
+        }
+
+        const valid = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(valid.status, 201);
+    });
+});
+
+test('removed administrator role prevents approval issuance', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app);
+
+        app.setIntrospection({
+            realm_access: {
+                roles: ['regular_user']
+            }
+        });
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(response.status, 403);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('inactive administrator token prevents approval issuance', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app);
+
+        app.setIntrospection({
+            active: false
+        });
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(response.status, 403);
+    });
+});
+
+test('approval operation must match current reference state', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app, 'enroll');
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody('enroll')
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'reference_already_exists' }
+        );
+    }, true);
+
+    await withApproval(async app => {
+        await authenticateApprover(app, 'replace');
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody('replace')
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'reference_not_found' }
+        );
+    });
+});
+
+test('concurrent requests cannot issue two approvals using one proof', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app);
+
+        const responses = await Promise.all([
+            app.post('/factor/approvals', approvalBody()),
+            app.post('/factor/approvals', approvalBody())
+        ]);
+
+        const statuses = responses
+            .map(response => response.status)
+            .sort((a, b) => a - b);
+
+        assert.deepEqual(statuses, [201, 409]);
+    });
+});
+
+test('approval issuance fails closed when face subsystem is disabled', async () => {
+    await withOperations(async app => {
+        await authenticateApprover(app);
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(response.status, 503);
+    });
+});
+
+test('cancellation during administrator introspection prevents approval', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app);
+
+        app.setIntrospectionHook(async () => {
+            const cancelled = await app.post(
+                '/attempts/cancel'
+            );
+
+            assert.equal(cancelled.status, 200);
+        });
+
+        const response = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(response.status, 409);
+    });
+});
+
+test('new administrator proof cannot overwrite an outstanding approval', async () => {
+    await withApproval(async app => {
+        await authenticateApprover(app);
+
+        const first = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(first.status, 201);
+
+        await authenticateApprover(app);
+
+        const second = await app.post(
+            '/factor/approvals',
+            approvalBody()
+        );
+
+        assert.equal(second.status, 409);
+
+        assert.deepEqual(
+            await second.json(),
+            { error: 'approval_already_exists' }
+        );
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
