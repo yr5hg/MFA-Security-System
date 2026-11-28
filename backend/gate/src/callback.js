@@ -140,6 +140,8 @@ export async function handleOidcCallback({
         throw new Error('Invalid authentication callback');
     }
 
+    let stage = 'callback_validation';
+
     try {
         if (
             url.searchParams.has('error') ||
@@ -161,6 +163,8 @@ export async function handleOidcCallback({
             throw new Error('Incorrect callback client');
         }
 
+        stage = 'token_exchange';
+
         const tokens = await exchangeCode(
             client,
             url,
@@ -174,6 +178,8 @@ export async function handleOidcCallback({
         );
 
         const claims = tokens.claims();
+
+        stage = 'identity_validation';
 
         const identity = validateIdentityClaims(
             config,
@@ -190,6 +196,8 @@ export async function handleOidcCallback({
             throw new Error('Required tokens missing');
         }
 
+        stage = 'authentication_evidence';
+
         const evidence = verifyEvidence
             ? await verifyEvidence({
                 status: 'identity_validated',
@@ -199,6 +207,8 @@ export async function handleOidcCallback({
                 accessToken: tokens.access_token
             })
             : null;
+
+        stage = 'session_validation';
 
         // Recheck after all asynchronous validation.
         if (
@@ -244,7 +254,53 @@ export async function handleOidcCallback({
             authorized: false
         };
 
-    } catch {
+    } catch (error) {
+        const safeReasons = [
+            'Authorization failed',
+            'Incorrect callback client',
+            'Invalid token issuer',
+            'Invalid token audience',
+            'Invalid authorized party',
+            'Invalid token nonce',
+            'Missing identity claims',
+            'Missing account identifier',
+            'Expired identity token',
+            'Authentication is not fresh',
+            'Required tokens missing',
+            'Missing authentication method evidence',
+            'Incorrect authentication method evidence',
+            'Access token is inactive',
+            'Incorrect access token issuer',
+            'Access token subject mismatch',
+            'Access token client mismatch',
+            'Incorrect access token audience',
+            'Access token expired',
+            'Access token is not yet valid',
+            'Missing or invalid realm roles',
+            'No permitted application role',
+            'Insufficient application role',
+            'Authentication attempt expired',
+            'Authentication attempt no longer valid',
+            'Session rotation failed'
+        ];
+
+        const code = error?.code ?? error?.cause?.code;
+
+        const safeCode =
+            typeof code === 'string' &&
+            /^OAUTH_[A-Z0-9_]{1,80}$/.test(code)
+                ? code
+                : 'unclassified';
+
+        console.warn('[OIDC diagnostic]', JSON.stringify({
+            method,
+            stage,
+            reason: safeReasons.includes(error?.message)
+                ? error.message
+                : 'Library or protocol validation failure',
+            code: safeCode
+        }));
+
         if (
             attempts.isClaimCurrent(
                 session.id,
