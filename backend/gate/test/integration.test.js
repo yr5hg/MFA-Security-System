@@ -9,7 +9,11 @@ import { createApp } from '../src/app.js';
 
 async function withApp(
     callback,
-    { enableOperations = false, faceDependencies = null } = {}
+    {
+        enableOperations = false,
+        faceDependencies = null,
+        referenceStore = faceDependencies?.references ?? null
+    } = {}
 ) {
     const config = {
         gateOrigin: '',
@@ -128,7 +132,8 @@ async function withApp(
         clients,
         exchangeCode,
         introspect,
-        faceDependencies
+        faceDependencies,
+        referenceStore
     });
 
     await new Promise((resolve, reject) => {
@@ -2330,7 +2335,10 @@ function syntheticReference() {
     };
 }
 
-async function withEnrollment(callback) {
+async function withEnrollment(
+    callback,
+    { faceEnabled = true } = {}
+) {
     const { createReferenceStore } = await import(
         '../src/reference-store.js'
     );
@@ -2384,7 +2392,10 @@ async function withEnrollment(callback) {
             app => callback(app, state, references),
             {
                 enableOperations: true,
-                faceDependencies: fixture.dependencies
+                faceDependencies: faceEnabled
+                    ? fixture.dependencies
+                    : null,
+                referenceStore: references
             }
         );
 
@@ -3183,5 +3194,394 @@ test('concurrent replacement requests cannot update the reference twice', async 
             references.get(ENROLLMENT_OWNER).version,
             2
         );
+    });
+});
+
+async function authenticateWithdrawal(app) {
+    app.setSubject(APPROVAL_TARGET);
+
+    await authenticate(
+        app,
+        'face_withdraw',
+        'totp'
+    );
+
+    const current = await app.initialize();
+
+    assert.equal(current.status, 'totp_verified');
+    assert.equal(current.action, 'face_withdraw');
+
+    return current;
+}
+
+test('authorized owner withdraws biometric reference and invalidates old sessions', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        const other = {
+            issuer: ENROLLMENT_ISSUER,
+            subject: 'different-account'
+        };
+
+        references.save(
+            other,
+            syntheticReference(),
+            0
+        );
+
+        app.setSubject(APPROVAL_TARGET);
+
+        await authenticate(app, 'view', 'totp');
+
+        const old = await app.initialize();
+        const oldCookie = app.getCookie();
+
+        // Create another browser session.
+        await app.request('/attempts/current', {
+            headers: { Cookie: '' }
+        });
+
+        await authenticateWithdrawal(app);
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 200);
+
+        assert.deepEqual(
+            await response.json(),
+            {
+                status: 'face_withdrawn',
+                removed: true
+            }
+        );
+
+        const stored = references.get(
+            ENROLLMENT_OWNER
+        );
+
+        assert.equal(stored.version, 2);
+        assert.equal(stored.reference, null);
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            false
+        );
+
+        // Another account's reference is unaffected.
+        assert.equal(
+            references.isCurrent(other, 1),
+            true
+        );
+
+        const replay = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(replay.status, 401);
+
+        const oldExecution = await app.post(
+            '/operations/execute',
+            {},
+            {
+                Cookie: oldCookie,
+                'X-CSRF-Token': old.csrfToken
+            }
+        );
+
+        assert.equal(oldExecution.status, 401);
+
+        // Fresh TOTP authentication is still available.
+        await authenticate(app, 'view', 'totp');
+
+        const fresh = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(fresh.status, 200);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('withdrawal works without the face inference subsystem', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        await authenticateWithdrawal(app);
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 200);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).reference,
+            null
+        );
+
+        assert.equal(state.calls, 0);
+
+    }, { faceEnabled: false });
+});
+
+test('withdrawal without active reference cancels outstanding enrollment approval', async () => {
+    await withEnrollment(async (app, state, references) => {
+        await approveOwner(app);
+
+        const current = await loginEnrollmentOwner(
+            app,
+            APPROVAL_TARGET,
+            'face_withdraw'
+        );
+
+        assert.equal(current.action, 'face_withdraw');
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 200);
+
+        assert.deepEqual(
+            await response.json(),
+            {
+                status: 'face_withdrawn',
+                removed: false
+            }
+        );
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).version,
+            0
+        );
+
+        await authenticate(app, 'face_enroll', 'totp');
+
+        const next = await app.initialize();
+
+        assert.equal(
+            next.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(next.captureChallenge, undefined);
+    });
+});
+
+test('ordinary TOTP proof cannot authorize withdrawal', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        app.setSubject(APPROVAL_TARGET);
+
+        await authenticate(app, 'view', 'totp');
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 403);
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            true
+        );
+    });
+});
+
+test('withdrawal enforces authentication confirmation target isolation and CSRF', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        const anonymous = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(anonymous.status, 401);
+
+        await authenticateWithdrawal(app);
+
+        for (const [body, headers, expected] of [
+            [{}, {}, 400],
+
+            [
+                { confirmWithdrawal: false },
+                {},
+                400
+            ],
+
+            [
+                {
+                    confirmWithdrawal: true,
+                    targetSubject: 'different-account'
+                },
+                {},
+                400
+            ],
+
+            [
+                { confirmWithdrawal: true },
+                { Origin: 'https://untrusted.test' },
+                403
+            ],
+
+            [
+                { confirmWithdrawal: true },
+                { 'X-CSRF-Token': 'invalid' },
+                403
+            ]
+        ]) {
+            const response = await app.post(
+                '/face/withdraw',
+                body,
+                headers
+            );
+
+            assert.equal(response.status, expected);
+        }
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            true
+        );
+
+        // Withdrawal authentication cannot grant
+        // access to ordinary protected operations.
+        const execution = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(execution.status, 403);
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 200);
+    });
+});
+
+test('revoked owner token cannot authorize withdrawal', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        await authenticateWithdrawal(app);
+
+        app.setIntrospection({
+            active: false
+        });
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 403);
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            true
+        );
+    });
+});
+
+test('cancellation during withdrawal introspection preserves reference', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        await authenticateWithdrawal(app);
+
+        app.setIntrospectionHook(async () => {
+            const cancelled = await app.post(
+                '/attempts/cancel'
+            );
+
+            assert.equal(cancelled.status, 200);
+        });
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            true
+        );
+    });
+});
+
+test('withdrawal fails closed if private reference storage is unavailable', async () => {
+    await withOperations(async app => {
+        await authenticateWithdrawal(app);
+
+        const response = await app.post(
+            '/face/withdraw',
+            { confirmWithdrawal: true }
+        );
+
+        assert.equal(response.status, 503);
+    });
+});
+
+test('withdrawal authentication cannot use the face method or target another account', async () => {
+    await withEnrollment(async app => {
+        await app.initialize();
+
+        const wrongMethod = await app.post(
+            '/attempts',
+            {
+                method: 'face',
+                action: 'face_withdraw'
+            }
+        );
+
+        assert.equal(wrongMethod.status, 400);
+
+        const wrongTarget = await app.post(
+            '/attempts',
+            {
+                method: 'totp',
+                action: 'face_withdraw',
+                targetSubject: 'different-account'
+            }
+        );
+
+        assert.equal(wrongTarget.status, 400);
     });
 });
