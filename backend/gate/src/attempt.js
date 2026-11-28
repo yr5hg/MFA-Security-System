@@ -4,10 +4,14 @@ import {
     timingSafeEqual
 } from 'node:crypto';
 
+import {
+    validAttemptPurpose
+} from './purpose.js';
+
 export const ATTEMPT_TTL_SECONDS = 300;
 
 const METHODS = new Set(['totp', 'face']);
-const ACTIONS = new Set(['view', 'admin']);
+
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const SESSION_ID_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -84,7 +88,7 @@ export function createAttemptStore({
         return attempt;
     }
 
-    function create(session, method, action) {
+    function create(session, method, action, targetSubject) {
         if (
             !session ||
             typeof session.id !== 'string' ||
@@ -99,7 +103,11 @@ export function createAttemptStore({
             throw new Error('Invalid authentication method');
         }
 
-        if (!ACTIONS.has(action)) {
+        if (!validAttemptPurpose(
+            method,
+            action,
+            targetSubject
+        )) {
             throw new Error('Invalid protected action');
         }
 
@@ -121,6 +129,10 @@ export function createAttemptStore({
 
             method,
             action,
+
+            ...(targetSubject !== undefined
+                ? { targetSubject }
+                : {}),
 
             status: 'pending_oidc',
 
@@ -165,6 +177,11 @@ export function createAttemptStore({
                 sessionId: attempt.sessionId,
                 method: attempt.method,
                 action: attempt.action,
+
+                ...(attempt.targetSubject !== undefined
+                    ? { targetSubject: attempt.targetSubject }
+                    : {}),
+
                 status: 'callback_claimed',
                 createdAt: attempt.createdAt,
                 expiresAt: attempt.expiresAt
