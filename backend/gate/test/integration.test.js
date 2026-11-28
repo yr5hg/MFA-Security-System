@@ -2810,7 +2810,8 @@ test('concurrent enrollment requests cannot reuse one approval', async () => {
     });
 });
 
-test('reference replacement remains disabled until recovery safeguards are implemented', async () => {
+
+test('approved replacement changes reference and revokes all owner sessions', async () => {
     await withEnrollment(async (app, state, references) => {
         references.save(
             ENROLLMENT_OWNER,
@@ -2827,28 +2828,112 @@ test('reference replacement remains disabled until recovery safeguards are imple
 
         assert.equal(approval.status, 201);
 
-        const current = await loginEnrollmentOwner(
+        // First authenticated owner session.
+        const first = await loginEnrollmentOwner(
             app,
             APPROVAL_TARGET,
-            'face_replace'
+            'view'
         );
 
-        assert.equal(
-            current.enrollmentError,
-            'replacement_unavailable'
-        );
+        const firstCookie = app.getCookie();
+
+        assert.equal(first.status, 'totp_verified');
+
+        // Independent unrelated browser session.
+        await app.request('/attempts/current', {
+            headers: { Cookie: '' }
+        });
+
+        app.setSubject('different-account');
+
+        await authenticate(app, 'view', 'totp');
+
+        const unrelated = await app.initialize();
+        const unrelatedCookie = app.getCookie();
+
+        // Second authenticated owner session.
+        await app.request('/attempts/current', {
+            headers: { Cookie: '' }
+        });
+
+        app.setSubject(APPROVAL_TARGET);
+
+        await authenticate(app, 'face_replace', 'totp');
+
+        const current = await app.initialize();
+
+        assert.equal(current.action, 'face_replace');
+        assert.ok(current.captureChallenge);
+
+        state.outcome.reference = {
+            policyVersion: FACE_POLICY_VERSION,
+            descriptor: Array(1024).fill(0.5)
+        };
 
         const response = await app.postEnrollment(
-            'x'.repeat(43)
+            current.captureChallenge
         );
 
-        assert.equal(response.status, 403);
-        assert.equal(state.calls, 0);
+        assert.equal(response.status, 201);
+
+        assert.deepEqual(
+            await response.json(),
+            { status: 'face_replaced' }
+        );
+
+        const stored = references.get(ENROLLMENT_OWNER);
+
+        assert.equal(stored.version, 2);
+
+        assert.deepEqual(
+            stored.reference.descriptor,
+            Array(1024).fill(0.5)
+        );
 
         assert.equal(
-            references.get(ENROLLMENT_OWNER).version,
-            1
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            false
         );
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 2),
+            true
+        );
+
+        assert.equal(state.calls, 1);
+
+        // Replacement session itself is revoked.
+        const replay = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(replay.status, 401);
+
+        // Earlier owner session is also revoked.
+        const oldSession = await app.post(
+            '/operations/execute',
+            {},
+            {
+                Cookie: firstCookie,
+                'X-CSRF-Token': first.csrfToken
+            }
+        );
+
+        assert.equal(oldSession.status, 401);
+
+        // Unrelated authenticated session remains usable.
+        app.setSubject('different-account');
+
+        const unaffected = await app.post(
+            '/operations/execute',
+            {},
+            {
+                Cookie: unrelatedCookie,
+                'X-CSRF-Token': unrelated.csrfToken
+            }
+        );
+
+        assert.equal(unaffected.status, 200);
     });
 });
 
@@ -2878,6 +2963,225 @@ test('enrollment worker exception fails closed without storing a reference', asy
         assert.equal(
             next.enrollmentError,
             'approval_required'
+        );
+    });
+});
+
+async function prepareReplacement(app, references) {
+    references.save(
+        ENROLLMENT_OWNER,
+        syntheticReference(),
+        0
+    );
+
+    await authenticateApprover(app, 'replace');
+
+    const approval = await app.post(
+        '/factor/approvals',
+        approvalBody('replace')
+    );
+
+    assert.equal(approval.status, 201);
+
+    const current = await loginEnrollmentOwner(
+        app,
+        APPROVAL_TARGET,
+        'face_replace'
+    );
+
+    assert.equal(current.action, 'face_replace');
+    assert.ok(current.captureChallenge);
+
+    return current;
+}
+
+test('replacement requires a dedicated administrator approval', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        app.setSubject(APPROVAL_TARGET);
+
+        await authenticate(app, 'face_replace', 'totp');
+
+        const current = await app.initialize();
+
+        assert.equal(
+            current.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(current.captureChallenge, undefined);
+
+        const response = await app.postEnrollment(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 409);
+        assert.equal(state.calls, 0);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).version,
+            1
+        );
+    });
+});
+
+test('replacement approval cannot be used for initial enrollment', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        await authenticateApprover(app, 'replace');
+
+        const approval = await app.post(
+            '/factor/approvals',
+            approvalBody('replace')
+        );
+
+        assert.equal(approval.status, 201);
+
+        const current = await loginEnrollmentOwner(
+            app,
+            APPROVAL_TARGET,
+            'face_enroll'
+        );
+
+        assert.equal(
+            current.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(current.captureChallenge, undefined);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('reference change during replacement prevents stale overwrite', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareReplacement(
+            app,
+            references
+        );
+
+        const newerReference = {
+            policyVersion: FACE_POLICY_VERSION,
+            descriptor: Array(1024).fill(0.75)
+        };
+
+        state.hook = async () => {
+            references.save(
+                ENROLLMENT_OWNER,
+                newerReference,
+                1
+            );
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'reference_changed' }
+        );
+
+        const stored = references.get(ENROLLMENT_OWNER);
+
+        assert.equal(stored.version, 2);
+
+        assert.deepEqual(
+            stored.reference.descriptor,
+            newerReference.descriptor
+        );
+    });
+});
+
+test('failed replacement capture preserves the original reference', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareReplacement(
+            app,
+            references
+        );
+
+        state.outcome = {
+            ok: false,
+            code: 'NO_FACE',
+            policyVersion: FACE_POLICY_VERSION
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 400);
+
+        const stored = references.get(ENROLLMENT_OWNER);
+
+        assert.equal(stored.version, 1);
+
+        assert.deepEqual(
+            stored.reference.descriptor,
+            syntheticReference().descriptor
+        );
+
+        assert.equal(
+            references.isCurrent(ENROLLMENT_OWNER, 1),
+            true
+        );
+
+        await authenticate(app, 'face_replace', 'totp');
+
+        const next = await app.initialize();
+
+        assert.equal(
+            next.enrollmentError,
+            'approval_required'
+        );
+    });
+});
+
+test('concurrent replacement requests cannot update the reference twice', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareReplacement(
+            app,
+            references
+        );
+
+        const responses = await Promise.all([
+            app.postEnrollment(current.captureChallenge),
+            app.postEnrollment(current.captureChallenge)
+        ]);
+
+        const statuses = responses.map(
+            response => response.status
+        );
+
+        assert.equal(
+            statuses.filter(status => status === 201).length,
+            1
+        );
+
+        assert.equal(
+            statuses.filter(status =>
+                status === 401 || status === 409
+            ).length,
+            1
+        );
+
+        assert.equal(state.calls, 1);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).version,
+            2
         );
     });
 });
