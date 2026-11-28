@@ -58,6 +58,7 @@ for file in \
     authorization.js \
     execution.js \
     face-flow.js \
+    purpose.js \
     reference-store.js \
     server.js
 do
