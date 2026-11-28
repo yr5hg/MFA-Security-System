@@ -15,6 +15,7 @@ import { createProofStore } from './proof.js';
 import { createApprovalStore } from './approval-store.js';
 import { createFactorApproval } from './approval-flow.js';
 import { createEnrollmentFlow } from './enrollment-flow.js';
+import { withdrawFaceReference } from './withdrawal-flow.js';
 import { isEnrollmentAction } from './purpose.js';
 import {
     createFaceFlow,
@@ -114,7 +115,8 @@ export function createApp({
     clients = null,
     exchangeCode,
     introspect,
-    faceDependencies = null
+    faceDependencies = null,
+    referenceStore = faceDependencies?.references ?? null
 } = {}) {
     const sessions = createSessionStore();
 
@@ -671,6 +673,7 @@ export function createApp({
         }
 
         const protectedPostRoutes = [
+            '/face/withdraw',
             '/factor/approvals',
             '/operations/execute',
             '/attempts',
@@ -724,6 +727,33 @@ export function createApp({
                 return sendJson(res, 403, {
                     error: 'invalid_csrf_token'
                 });
+            }
+
+            if (url.pathname === '/face/withdraw') {
+                if (url.search) {
+                    return sendJson(res, 400, {
+                        error: 'invalid_withdrawal_request'
+                    });
+                }
+
+                const result = await withdrawFaceReference({
+                    config,
+                    clients,
+                    sessions,
+                    attempts,
+                    proofs: authentication,
+                    approvals,
+                    references: referenceStore,
+                    sessionToken,
+                    body,
+                    introspect
+                });
+
+                return sendJson(
+                    res,
+                    result.httpStatus,
+                    result.body
+                );
             }
 
             if (url.pathname === '/factor/approvals') {

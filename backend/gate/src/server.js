@@ -25,15 +25,39 @@ try {
     console.log('Face OIDC client initialized');
 
     let faceDependencies = null;
+    let referenceStore = null;
+    let facePolicy = null;
 
-    if (config.faceSimilarityThreshold !== null) {
+    // Reference management remains independent
+    // of the face inference worker.
+    try {
+        const { default: policy } = await import(
+            '../../face-verifier/src/verification-policy.js'
+        );
+
+        referenceStore = createReferenceStore({
+            privateStateDir: config.privateStateDir,
+            issuer: config.keycloakIssuer,
+            policyVersion: policy.POLICY.version,
+            validateReference: policy.validReference
+        });
+
+        facePolicy = policy;
+
+        console.log('Private reference store initialized');
+
+    } catch {
+        console.warn('Private reference store unavailable');
+    }
+
+    if (
+        referenceStore &&
+        facePolicy &&
+        config.faceSimilarityThreshold !== null
+    ) {
         try {
             const { default: faceModule } = await import(
                 '../../face-verifier/index.js'
-            );
-
-            const { default: policy } = await import(
-                '../../face-verifier/src/verification-policy.js'
             );
 
             const verifier = faceModule.createFaceVerifier({
@@ -42,17 +66,10 @@ try {
                 modelDir: config.humanModelDir
             });
 
-            const references = createReferenceStore({
-                privateStateDir: config.privateStateDir,
-                issuer: config.keycloakIssuer,
-                policyVersion: policy.POLICY.version,
-                validateReference: policy.validReference
-            });
-
             faceDependencies = {
                 verifier,
-                references,
-                policyVersion: policy.POLICY.version
+                references: referenceStore,
+                policyVersion: facePolicy.POLICY.version
             };
 
             console.log('Private face verifier initialized');
@@ -68,7 +85,8 @@ try {
         tls,
         config,
         clients,
-        faceDependencies
+        faceDependencies,
+        referenceStore
     });
 
     server.requestTimeout = 15000;
