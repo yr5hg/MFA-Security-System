@@ -48,7 +48,10 @@ export function validAttemptPurpose(
         return validTargetSubject(targetSubject);
     }
 
-    if (isEnrollmentAction(action)) {
+    if (
+        isEnrollmentAction(action) ||
+        action === 'face_withdraw'
+    ) {
         // The owner is derived from verified identity.
         return targetSubject === undefined;
     }

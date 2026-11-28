@@ -75,7 +75,11 @@ export function isActionAllowed(roles, action) {
         return false;
     }
 
-    if (action === 'view' || isEnrollmentAction(action)) {
+    if (
+        action === 'view' ||
+        isEnrollmentAction(action) ||
+        action === 'face_withdraw'
+    ) {
         return roles.includes('regular_user') ||
             roles.includes('administrator');
     }
