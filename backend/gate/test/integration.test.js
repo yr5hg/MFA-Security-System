@@ -948,7 +948,7 @@ test('face verification requires an authenticated session', async () => {
     });
 });
 
-test('valid match completes face factor but cannot execute yet', async () => {
+test('verified face user executes view operation only once', async () => {
     await withFace(async (app, state) => {
         const status = await beginFace(app);
 
@@ -985,7 +985,26 @@ test('valid match completes face factor but cannot execute yet', async () => {
             '/operations/execute'
         );
 
-        assert.equal(execute.status, 403);
+        assert.equal(execute.status, 200);
+
+        const result = await execute.json();
+
+        assert.equal(result.status, 'executed');
+        assert.equal(result.action, 'view');
+        assert.equal(
+            result.content,
+            'CONFIDENTIAL TEST RESOURCE'
+        );
+
+        const repeated = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(repeated.status, 409);
+
+        const finalStatus = await app.initialize();
+
+        assert.equal(finalStatus.status, 'idle');
     });
 });
 
@@ -1323,9 +1342,308 @@ test('concurrent capture requests cannot reuse one challenge', async () => {
             release();
         }
 
+
         const response = await first;
 
         assert.equal(response.status, 200);
         assert.equal(state.calls, 1);
+    });
+});
+async function completeFaceAuthentication(
+    app,
+    action = 'view'
+) {
+    await authenticate(app, action, 'face');
+
+    const status = await app.initialize();
+
+    assert.equal(status.status, 'pending_face');
+    assert.ok(status.captureChallenge);
+
+    const verification = await app.postFace(
+        status.captureChallenge
+    );
+
+    assert.equal(verification.status, 200);
+
+    assert.deepEqual(
+        await verification.json(),
+        { status: 'face_verified' }
+    );
+}
+
+test('face authenticated administrator executes integrity inspection', async () => {
+    await withFace(async app => {
+        app.setIntrospection({
+            realm_access: {
+                roles: ['administrator']
+            }
+        });
+
+        await completeFaceAuthentication(
+            app,
+            'admin'
+        );
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 200);
+
+        const result = await response.json();
+
+        assert.equal(result.status, 'executed');
+        assert.equal(result.action, 'admin');
+
+        assert.equal(
+            result.resourceIntegrity.algorithm,
+            'SHA-256'
+        );
+
+        assert.equal(
+            result.resourceIntegrity.digest.length,
+            64
+        );
+
+        assert.equal(result.content, undefined);
+    });
+});
+
+test('removed administrator role denies face execution', async () => {
+    await withFace(async app => {
+        app.setIntrospection({
+            realm_access: {
+                roles: ['administrator']
+            }
+        });
+
+        await completeFaceAuthentication(
+            app,
+            'admin'
+        );
+
+        app.setIntrospection({
+            realm_access: {
+                roles: ['regular_user']
+            }
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 403);
+
+        const repeated = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(repeated.status, 409);
+    });
+});
+
+test('replaced reference prevents face execution', async () => {
+    await withFace(async (app, state) => {
+        await completeFaceAuthentication(app);
+
+        state.version++;
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'reference_changed' }
+        );
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('withdrawn reference during introspection denies face execution', async () => {
+    await withFace(async (app, state) => {
+        await completeFaceAuthentication(app);
+
+        app.setIntrospectionHook(async () => {
+            state.enrolled = false;
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'reference_changed' }
+        );
+    });
+});
+
+test('reference replacement during execution introspection is rejected', async () => {
+    await withFace(async (app, state) => {
+        await completeFaceAuthentication(app);
+
+        app.setIntrospectionHook(async () => {
+            state.version++;
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+
+        const result = await response.json();
+
+        assert.equal(
+            result.error,
+            'reference_changed'
+        );
+
+        assert.equal(result.content, undefined);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('revoked Keycloak token denies completed face proof', async () => {
+    await withFace(async app => {
+        await completeFaceAuthentication(app);
+
+        app.setIntrospection({
+            active: false
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 403);
+
+        const repeated = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(repeated.status, 409);
+    });
+});
+
+test('TOTP client evidence cannot authorize a face proof', async () => {
+    await withFace(async app => {
+        await completeFaceAuthentication(app);
+
+        app.setIntrospection({
+            client_id: 'gate-totp',
+            azp: 'gate-totp',
+            aud: ['gate-totp', 'lab-resource']
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 403);
+    });
+});
+
+test('Keycloak outage denies completed face authentication', async () => {
+    await withFace(async app => {
+        await completeFaceAuthentication(app);
+
+        app.setIntrospectionHook(async () => {
+            throw new Error(
+                'Simulated Keycloak outage'
+            );
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 503);
+
+        app.setIntrospectionHook(null);
+
+        const repeated = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(repeated.status, 409);
+    });
+});
+
+test('concurrent face execution consumes proof only once', async () => {
+    await withFace(async app => {
+        await completeFaceAuthentication(app);
+
+        const responses = await Promise.all([
+            app.post('/operations/execute'),
+            app.post('/operations/execute')
+        ]);
+
+        const statuses = responses
+            .map(response => response.status)
+            .sort((a, b) => a - b);
+
+        assert.deepEqual(
+            statuses,
+            [200, 409]
+        );
+    });
+});
+
+test('cancellation during face execution prevents resource access', async () => {
+    await withFace(async app => {
+        await completeFaceAuthentication(app);
+
+        app.setIntrospectionHook(async () => {
+            const cancelled = await app.post(
+                '/attempts/cancel'
+            );
+
+            assert.equal(cancelled.status, 200);
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('expired completed face proof cannot execute', async t => {
+    t.mock.timers.enable({
+        apis: ['Date']
+    });
+
+    await withFace(async app => {
+        await completeFaceAuthentication(app);
+
+        t.mock.timers.tick(301000);
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+
+        const result = await response.json();
+
+        assert.equal(result.content, undefined);
     });
 });

@@ -265,3 +265,94 @@ test('directory cannot be used as protected resource', t => {
         /Protected resource unavailable/
     );
 });
+function completedFaceProof() {
+    const record = proof();
+
+    record.identity = {
+        issuer: 'https://id.test:8443/realms/multi-factor-authentication',
+        subject: 'test-account'
+    };
+
+    record.evidence.method = 'face';
+    record.evidence.status = 'face_verified';
+    record.evidence.referenceVersion = 1;
+
+    record.evidence.factors = {
+        passwordVerified: true,
+        totpVerified: false,
+        faceVerified: true
+    };
+
+    return record;
+}
+
+test('resource requires the active face reference version', t => {
+    const { operations } = setup(t);
+
+    const record = completedFaceProof();
+
+    let activeVersion = 1;
+
+    const references = {
+        isCurrent(identity, version) {
+            assert.equal(
+                identity.subject,
+                'test-account'
+            );
+
+            return version === activeVersion;
+        }
+    };
+
+    const result = operations.execute(
+        record,
+        ['regular_user'],
+        references
+    );
+
+    assert.equal(result.content, CONTENT);
+
+    activeVersion = 2;
+
+    assert.throws(
+        () => operations.execute(
+            record,
+            ['regular_user'],
+            references
+        ),
+        /Face reference changed/
+    );
+});
+
+test('face execution without a reference store is denied', t => {
+    const { operations } = setup(t);
+
+    assert.throws(
+        () => operations.execute(
+            completedFaceProof(),
+            ['regular_user']
+        ),
+        /Face reference unavailable/
+    );
+});
+
+test('inconsistent mixed authentication factors are rejected', t => {
+    const { operations } = setup(t);
+
+    const record = completedFaceProof();
+
+    record.evidence.factors.totpVerified = true;
+
+    const references = {
+        isCurrent: () => true
+    };
+
+    assert.throws(
+        () => operations.execute(
+            record,
+            ['regular_user'],
+            references
+        ),
+        /Authentication factors incomplete/
+    );
+});
