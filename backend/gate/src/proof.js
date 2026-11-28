@@ -3,6 +3,60 @@ import { isActionAllowed } from './evidence.js';
 const SESSION_ID_PATTERN = /^[a-f0-9]{64}$/;
 const ATTEMPT_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
+export function hasCompletedFactors(evidence) {
+    const factors = evidence?.factors;
+
+    if (factors?.passwordVerified !== true) {
+        return false;
+    }
+
+    if (evidence.method === 'totp') {
+        return (
+            evidence.status === 'totp_verified' &&
+            factors.totpVerified === true &&
+            factors.faceVerified === false
+        );
+    }
+
+    if (evidence.method === 'face') {
+        return (
+            evidence.status === 'face_verified' &&
+            factors.totpVerified === false &&
+            factors.faceVerified === true &&
+            Number.isSafeInteger(evidence.referenceVersion) &&
+            evidence.referenceVersion > 0
+        );
+    }
+
+    return false;
+}
+
+export function requireCurrentFaceReference(
+    record,
+    references
+) {
+    if (record?.evidence?.method !== 'face') {
+        return;
+    }
+
+    if (
+        !hasCompletedFactors(record.evidence) ||
+        !record.identity ||
+        typeof references?.isCurrent !== 'function'
+    ) {
+        throw new Error('Face reference unavailable');
+    }
+
+    if (
+        references.isCurrent(
+            record.identity,
+            record.evidence.referenceVersion
+        ) !== true
+    ) {
+        throw new Error('Face reference changed');
+    }
+}
+
 export function createProofStore({
     maxRecords = 1000,
     now = Date.now
@@ -295,12 +349,7 @@ export function createProofStore({
 
         const { record } = entry;
 
-        if (
-            record.evidence.method !== 'totp' ||
-            record.evidence.status !== 'totp_verified' ||
-            record.evidence.factors.passwordVerified !== true ||
-            record.evidence.factors.totpVerified !== true
-        ) {
+        if (!hasCompletedFactors(record.evidence)) {
             return null;
         }
 
