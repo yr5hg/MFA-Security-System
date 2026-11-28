@@ -12,6 +12,8 @@ import {
 
 import { createAttemptStore } from './attempt.js';
 import { createProofStore } from './proof.js';
+import { createProtectedOperations } from './resource.js';
+import { executeProtectedOperation } from './execution.js';
 import { buildLoginUrl } from './oidc.js';
 import { handleOidcCallback } from './callback.js';
 
@@ -114,6 +116,12 @@ export function createApp({
     // Sensitive authentication results remain server-side.
     const authentication = createProofStore();
 
+    const operations = config?.protectedResourceFile
+        ? createProtectedOperations({
+            resourceFile: config.protectedResourceFile
+        })
+        : null;
+
     const authenticationReady = Boolean(
         config && clients?.totp && clients?.face
     );
@@ -153,10 +161,11 @@ export function createApp({
             });
         }
 
-        // Protected resource execution remains disabled.
+        // Fail closed when execution is not configured.
         if (
             req.method === 'POST' &&
-            req.url === '/operations/execute'
+            req.url === '/operations/execute' &&
+            (!authenticationReady || !operations)
         ) {
             return sendJson(res, 503, {
                 error: 'authentication_not_available'
@@ -256,6 +265,38 @@ export function createApp({
 
                         <button name="method" value="face">
                             Password + Face
+                        </button>
+                    </form>
+
+                    <hr>
+
+                    <h2>Protected Operation Testing</h2>
+
+                    <form method="POST" action="/operations/execute">
+                        <input type="hidden" name="csrfToken"
+                            value="${session.csrfToken}">
+                        <button type="submit">
+                            Execute Protected Operation
+                        </button>
+                    </form>
+
+                    <br>
+
+                    <form method="POST" action="/attempts/cancel">
+                        <input type="hidden" name="csrfToken"
+                            value="${session.csrfToken}">
+                        <button type="submit">
+                            Cancel Attempt
+                        </button>
+                    </form>
+
+                    <br>
+
+                    <form method="POST" action="/logout">
+                        <input type="hidden" name="csrfToken"
+                            value="${session.csrfToken}">
+                        <button type="submit">
+                            Logout
                         </button>
                     </form>
 
@@ -371,6 +412,7 @@ export function createApp({
         }
 
         const protectedPostRoutes = [
+            '/operations/execute',
             '/attempts',
             '/attempts/cancel',
             '/logout'
@@ -422,6 +464,42 @@ export function createApp({
                 return sendJson(res, 403, {
                     error: 'invalid_csrf_token'
                 });
+            }
+
+            if (url.pathname === '/operations/execute') {
+                if (!operations) {
+                    return sendJson(res, 503, {
+                        error: 'operation_unavailable'
+                    });
+                }
+
+                // The browser cannot override the stored action.
+                if (
+                    url.search ||
+                    Object.keys(body).some(
+                        key => key !== 'csrfToken'
+                    )
+                ) {
+                    return sendJson(res, 400, {
+                        error: 'invalid_operation_request'
+                    });
+                }
+
+                const result = await executeProtectedOperation({
+                    config,
+                    clients,
+                    sessions,
+                    proofs: authentication,
+                    operations,
+                    sessionToken,
+                    introspect
+                });
+
+                return sendJson(
+                    res,
+                    result.httpStatus,
+                    result.body
+                );
             }
 
             if (url.pathname === '/attempts') {
