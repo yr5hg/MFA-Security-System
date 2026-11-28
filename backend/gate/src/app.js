@@ -11,6 +11,7 @@ import {
 } from './session.js';
 
 import { createAttemptStore } from './attempt.js';
+import { createProofStore } from './proof.js';
 import { buildLoginUrl } from './oidc.js';
 import { handleOidcCallback } from './callback.js';
 
@@ -111,29 +112,23 @@ export function createApp({
     });
 
     // Sensitive authentication results remain server-side.
-    const authentication = new Map();
+    const authentication = createProofStore();
 
     const authenticationReady = Boolean(
         config && clients?.totp && clients?.face
     );
 
     function purgeAuthentication() {
-        const now = Date.now();
-
-        for (const [id, record] of authentication) {
-            if (record.evidence.expiresAt <= now) {
-                authentication.delete(id);
-            }
-        }
+        authentication.purgeExpired();
     }
 
     function clearAuthentication(session) {
         attempts.cancel(session.id);
-        authentication.delete(session.id);
+        authentication.revoke(session.id);
     }
 
     function currentStatus(session) {
-        const record = authentication.get(session.id);
+        const record = authentication.get(session);
 
         if (record) {
             return {
@@ -336,15 +331,12 @@ export function createApp({
                         })
                 });
 
-                authentication.delete(session.id);
+                authentication.revoke(session.id);
 
-                authentication.set(result.session.id, {
-                    identity: result.identity,
-                    attemptId: result.attempt.id,
-                    evidence: result.evidence,
-                    accessToken: result.accessToken,
-                    idToken: result.idToken
-                });
+                authentication.save(
+                    result.session,
+                    result
+                );
 
                 return redirect(
                     res,
