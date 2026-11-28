@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import * as oidc from 'openid-client';
 
 import { createApp } from '../src/app.js';
 
-async function withApp(callback) {
+async function withApp(
+    callback,
+    { enableOperations = false } = {}
+) {
     const config = {
         gateOrigin: '',
         keycloakIssuer:
@@ -15,6 +21,25 @@ async function withApp(callback) {
         resourceAudience: 'lab-resource',
         attemptTtlSeconds: 300
     };
+
+    let resourceDirectory;
+
+    if (enableOperations) {
+        resourceDirectory = mkdtempSync(
+            join(tmpdir(), 'mfa-execution-test-')
+        );
+
+        config.protectedResourceFile = join(
+            resourceDirectory,
+            'confidential.txt'
+        );
+
+        writeFileSync(
+            config.protectedResourceFile,
+            'CONFIDENTIAL TEST RESOURCE',
+            { mode: 0o600 }
+        );
+    }
 
     function mockClient(method) {
         return new oidc.Configuration(
@@ -34,6 +59,8 @@ async function withApp(callback) {
     };
 
     let amrOverride;
+    let introspectionOverrides = {};
+    let introspectionHook = null;
 
     const exchangeCode = async (client, url, checks) => {
         const clientId =
@@ -62,6 +89,9 @@ async function withApp(callback) {
     };
 
     const introspect = async client => {
+        if (introspectionHook) {
+            await introspectionHook();
+        }
         const clientId =
             client.clientMetadata().client_id;
 
@@ -75,7 +105,9 @@ async function withApp(callback) {
             exp: Math.floor(Date.now() / 1000) + 300,
             realm_access: {
                 roles: ['regular_user']
-            }
+            },
+
+            ...introspectionOverrides
         };
     };
 
@@ -189,6 +221,18 @@ async function withApp(callback) {
 
             setAmr: value => {
                 amrOverride = value;
+            },
+
+            setIntrospection: value => {
+                introspectionOverrides = value;
+            },
+
+            setIntrospectionHook: callback => {
+                introspectionHook = callback;
+            },
+
+            removeResource: () => {
+                rmSync(config.protectedResourceFile);
             }
         });
 
@@ -196,6 +240,13 @@ async function withApp(callback) {
         await new Promise(resolve => {
             server.close(resolve);
         });
+
+        if (resourceDirectory) {
+            rmSync(resourceDirectory, {
+                recursive: true,
+                force: true
+            });
+        }
     }
 }
 
@@ -418,5 +469,318 @@ test('protected operations remain denied after TOTP verification', async () => {
         );
 
         assert.equal(response.status, 503);
+    });
+});
+async function withOperations(callback) {
+    return withApp(callback, {
+        enableOperations: true
+    });
+}
+
+async function authenticate(
+    app,
+    action = 'view',
+    method = 'totp'
+) {
+    await app.initialize();
+
+    const { callbackPath } = await app.begin(
+        method,
+        action
+    );
+
+    const response = await app.request(callbackPath);
+
+    assert.equal(response.status, 303);
+
+    await app.initialize();
+}
+
+test('verified TOTP user executes view operation only once', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 200);
+
+        const result = await response.json();
+
+        assert.equal(result.status, 'executed');
+        assert.equal(result.action, 'view');
+
+        assert.equal(
+            result.content,
+            'CONFIDENTIAL TEST RESOURCE'
+        );
+
+        assert.equal(result.accessToken, undefined);
+
+        const replay = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(replay.status, 409);
+
+        const status = await app.initialize();
+
+        assert.equal(status.status, 'idle');
+    });
+});
+
+test('administrator executes admin integrity inspection', async () => {
+    await withOperations(async app => {
+        app.setIntrospection({
+            realm_access: {
+                roles: ['administrator']
+            }
+        });
+
+        await authenticate(app, 'admin');
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 200);
+
+        const result = await response.json();
+
+        assert.equal(result.action, 'admin');
+
+        assert.equal(
+            result.resourceIntegrity.algorithm,
+            'SHA-256'
+        );
+
+        assert.equal(
+            result.resourceIntegrity.digest.length,
+            64
+        );
+
+        assert.equal(result.content, undefined);
+    });
+});
+
+test('pending face authentication cannot release resource', async () => {
+    await withOperations(async app => {
+        await authenticate(app, 'view', 'face');
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 403);
+    });
+});
+
+test('unauthenticated execution request is denied', async () => {
+    await withOperations(async app => {
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 401);
+    });
+});
+
+test('execution enforces same origin and CSRF protection', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        const crossOrigin = await app.post(
+            '/operations/execute',
+            {},
+            { Origin: 'https://other.test' }
+        );
+
+        assert.equal(crossOrigin.status, 403);
+
+        const invalidCsrf = await app.post(
+            '/operations/execute',
+            {},
+            { 'X-CSRF-Token': 'invalid' }
+        );
+
+        assert.equal(invalidCsrf.status, 403);
+    });
+});
+
+test('browser cannot override protected action or role', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        const response = await app.post(
+            '/operations/execute',
+            {
+                action: 'admin',
+                role: 'administrator'
+            }
+        );
+
+        assert.equal(response.status, 400);
+
+        // The legitimate original action remains available.
+        const valid = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(valid.status, 200);
+
+        const result = await valid.json();
+
+        assert.equal(result.action, 'view');
+    });
+});
+
+test('revoked access token prevents protected execution', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        app.setIntrospection({
+            active: false
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 403);
+
+        // Failed revalidation invalidates the proof.
+        app.setIntrospection({
+            active: true
+        });
+
+        const retry = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(retry.status, 409);
+    });
+});
+
+test('insufficient revalidated role prevents admin operation', async () => {
+    await withOperations(async app => {
+        app.setIntrospection({
+            realm_access: {
+                roles: ['administrator']
+            }
+        });
+
+        await authenticate(app, 'admin');
+
+        app.setIntrospection({
+            realm_access: {
+                roles: ['regular_user']
+            }
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 403);
+    });
+});
+
+test('Keycloak outage prevents protected execution', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        app.setIntrospectionHook(async () => {
+            throw new Error('Keycloak unavailable');
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 503);
+
+        app.setIntrospectionHook(null);
+
+        const retry = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(retry.status, 409);
+    });
+});
+
+test('concurrent requests cannot execute the same proof twice', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        const responses = await Promise.all([
+            app.post('/operations/execute'),
+            app.post('/operations/execute')
+        ]);
+
+        const statuses = responses
+            .map(response => response.status)
+            .sort((a, b) => a - b);
+
+        assert.deepEqual(statuses, [200, 409]);
+    });
+});
+
+test('cancellation during execution introspection denies access', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        app.setIntrospectionHook(async () => {
+            const cancelled = await app.post(
+                '/attempts/cancel'
+            );
+
+            assert.equal(cancelled.status, 200);
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+    });
+});
+
+test('logout during execution introspection denies access', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        app.setIntrospectionHook(async () => {
+            const logout = await app.post('/logout');
+
+            assert.equal(logout.status, 200);
+        });
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 409);
+    });
+});
+
+test('resource failure consumes proof and prevents retry', async () => {
+    await withOperations(async app => {
+        await authenticate(app);
+
+        app.removeResource();
+
+        const response = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(response.status, 503);
+
+        const retry = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(retry.status, 409);
     });
 });
