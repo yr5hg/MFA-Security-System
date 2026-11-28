@@ -57,6 +57,7 @@ for file in \
     resource.js \
     authorization.js \
     execution.js \
+    reference-store.js \
     server.js
 do
     install -m 644 -o root -g root \
