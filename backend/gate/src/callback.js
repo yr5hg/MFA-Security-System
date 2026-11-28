@@ -242,6 +242,11 @@ export async function handleOidcCallback({
                 id: attempt.id,
                 method: attempt.method,
                 action: attempt.action,
+
+                ...(attempt.targetSubject !== undefined
+                    ? { targetSubject: attempt.targetSubject }
+                    : {}),
+
                 expiresAt: attempt.expiresAt
             },
 

@@ -1,5 +1,11 @@
 import * as oidc from 'openid-client';
 
+import {
+    isApprovalAction,
+    isEnrollmentAction,
+    validAttemptPurpose
+} from './purpose.js';
+
 function expectedClientId(config, method) {
     if (method === 'totp') {
         return config.totpClientId;
@@ -69,12 +75,12 @@ export function isActionAllowed(roles, action) {
         return false;
     }
 
-    if (action === 'view') {
+    if (action === 'view' || isEnrollmentAction(action)) {
         return roles.includes('regular_user') ||
             roles.includes('administrator');
     }
 
-    if (action === 'admin') {
+    if (action === 'admin' || isApprovalAction(action)) {
         return roles.includes('administrator');
     }
 
@@ -224,6 +230,22 @@ export async function validateAuthenticationEvidence({
         throw new Error('Authentication attempt expired');
     }
 
+    if (!validAttemptPurpose(
+        attempt.method,
+        attempt.action,
+        attempt.targetSubject
+    )) {
+        throw new Error('Invalid authentication purpose');
+    }
+
+    // Administrators cannot approve their own enrollment.
+    if (
+        isApprovalAction(attempt.action) &&
+        attempt.targetSubject === identity.subject
+    ) {
+        throw new Error('Self-approval is forbidden');
+    }
+
     const factors = validateAmr(
         attempt.method,
         callbackResult.claims?.amr
@@ -252,6 +274,10 @@ export async function validateAuthenticationEvidence({
     return Object.freeze({
         method: attempt.method,
         action: attempt.action,
+
+        ...(attempt.targetSubject !== undefined
+            ? { targetSubject: attempt.targetSubject }
+            : {}),
 
         issuer: identity.issuer,
         subject: identity.subject,

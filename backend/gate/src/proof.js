@@ -1,5 +1,10 @@
 import { isActionAllowed } from './evidence.js';
 
+import {
+    isApprovalAction,
+    validAttemptPurpose
+} from './purpose.js';
+
 const SESSION_ID_PATTERN = /^[a-f0-9]{64}$/;
 const ATTEMPT_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
@@ -160,9 +165,24 @@ export function createProofStore({
             evidence.issuer !== identity.issuer ||
             evidence.subject !== identity.subject ||
             evidence.method !== attempt.method ||
-            evidence.action !== attempt.action
+            evidence.action !== attempt.action ||
+            evidence.targetSubject !== attempt.targetSubject
         ) {
             throw new Error('Authentication evidence mismatch');
+        }
+
+        if (
+            !validAttemptPurpose(
+                evidence.method,
+                evidence.action,
+                evidence.targetSubject
+            ) ||
+            (
+                isApprovalAction(evidence.action) &&
+                evidence.targetSubject === identity.subject
+            )
+        ) {
+            throw new Error('Invalid proof purpose');
         }
 
         if (
@@ -253,6 +273,11 @@ export function createProofStore({
                 subject: evidence.subject,
                 method: evidence.method,
                 action: evidence.action,
+
+                ...(evidence.targetSubject !== undefined
+                    ? { targetSubject: evidence.targetSubject }
+                    : {}),
+
                 status: evidence.status,
                 authorized: false,
 
