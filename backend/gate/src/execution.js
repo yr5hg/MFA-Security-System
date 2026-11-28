@@ -1,5 +1,10 @@
 import { revalidateClaim } from './authorization.js';
 
+import {
+    hasCompletedFactors,
+    requireCurrentFaceReference
+} from './proof.js';
+
 function failure(httpStatus, error) {
     return {
         httpStatus,
@@ -34,7 +39,8 @@ export async function executeProtectedOperation({
     proofs,
     operations,
     sessionToken,
-    introspect
+    introspect,
+    references = null
 }) {
     const session = sessions.get(sessionToken);
 
@@ -48,10 +54,7 @@ export async function executeProtectedOperation({
         return failure(409, 'no_available_proof');
     }
 
-    if (
-        record.evidence.method !== 'totp' ||
-        record.evidence.status !== 'totp_verified'
-    ) {
+    if (!hasCompletedFactors(record.evidence)) {
         return failure(403, 'authentication_incomplete');
     }
 
@@ -70,7 +73,8 @@ export async function executeProtectedOperation({
             proofs,
             sessionToken,
             claimed,
-            introspect
+            introspect,
+            references
         });
 
         const currentSession = sessions.get(sessionToken);
@@ -92,11 +96,19 @@ export async function executeProtectedOperation({
             validated.subject !== record.identity.subject ||
             validated.method !== record.evidence.method ||
             validated.action !== record.evidence.action ||
+            validated.referenceVersion !==
+                record.evidence.referenceVersion ||
             !Number.isSafeInteger(validated.expiresAt) ||
             validated.expiresAt <= Date.now()
         ) {
             return failure(403, 'authorization_failed');
         }
+
+        // Last reference check before proof consumption.
+        requireCurrentFaceReference(
+            record,
+            references
+        );
 
         // Consume before accessing the protected resource.
         const consumed = proofs.consume(
@@ -112,7 +124,8 @@ export async function executeProtectedOperation({
         // and synchronous resource execution.
         const result = operations.execute(
             consumed,
-            validated.roles
+            validated.roles,
+            references
         );
 
         return {
@@ -123,6 +136,10 @@ export async function executeProtectedOperation({
     } catch (error) {
         if (authorizationErrors.has(error?.message)) {
             return failure(403, 'authorization_failed');
+        }
+
+        if (error?.message === 'Face reference changed') {
+            return failure(409, 'reference_changed');
         }
 
         if (staleClaimErrors.has(error?.message)) {
