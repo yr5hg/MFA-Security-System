@@ -12,6 +12,8 @@ import {
 
 import { createAttemptStore } from './attempt.js';
 import { createProofStore } from './proof.js';
+import { createApprovalStore } from './approval-store.js';
+import { createFactorApproval } from './approval-flow.js';
 import {
     createFaceFlow,
     readFaceJpeg
@@ -135,6 +137,13 @@ export function createApp({
         })
         : null;
 
+    const approvals = faceFlow
+        ? createApprovalStore({
+            issuer: config.keycloakIssuer,
+            ttlSeconds: config.approvalTtlSeconds ?? 600
+        })
+        : null;
+
     const operations = config?.protectedResourceFile
         ? createProtectedOperations({
             resourceFile: config.protectedResourceFile
@@ -147,6 +156,7 @@ export function createApp({
 
     function purgeAuthentication() {
         authentication.purgeExpired();
+        approvals?.purgeExpired();
     }
 
     function clearAuthentication(session) {
@@ -531,6 +541,7 @@ export function createApp({
         }
 
         const protectedPostRoutes = [
+            '/factor/approvals',
             '/operations/execute',
             '/attempts',
             '/attempts/cancel',
@@ -583,6 +594,33 @@ export function createApp({
                 return sendJson(res, 403, {
                     error: 'invalid_csrf_token'
                 });
+            }
+
+            if (url.pathname === '/factor/approvals') {
+                if (url.search) {
+                    return sendJson(res, 400, {
+                        error: 'invalid_approval_request'
+                    });
+                }
+
+                const result = await createFactorApproval({
+                    config,
+                    clients,
+                    sessions,
+                    proofs: authentication,
+                    approvals,
+                    references:
+                        faceDependencies?.references ?? null,
+                    sessionToken,
+                    body,
+                    introspect
+                });
+
+                return sendJson(
+                    res,
+                    result.httpStatus,
+                    result.body
+                );
             }
 
             if (url.pathname === '/operations/execute') {
