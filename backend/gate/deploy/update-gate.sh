@@ -61,6 +61,7 @@ for file in \
     purpose.js \
     approval-store.js \
     approval-flow.js \
+    enrollment-flow.js \
     reference-store.js \
     server.js
 do
