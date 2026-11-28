@@ -62,6 +62,7 @@ for file in \
     approval-store.js \
     approval-flow.js \
     enrollment-flow.js \
+    account-invalidation.js \
     reference-store.js \
     server.js
 do

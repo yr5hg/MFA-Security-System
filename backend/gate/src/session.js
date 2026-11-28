@@ -9,6 +9,30 @@ const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export const SESSION_TTL_SECONDS = 900;
 
+function validAccountIdentity(identity) {
+    return (
+        typeof identity?.issuer === 'string' &&
+        identity.issuer.length > 0 &&
+        typeof identity.subject === 'string' &&
+        identity.subject.length > 0
+    );
+}
+
+function copyAccountIdentity(identity) {
+    if (identity === null) {
+        return null;
+    }
+
+    if (!validAccountIdentity(identity)) {
+        throw new Error('Invalid session account identity');
+    }
+
+    return Object.freeze({
+        issuer: identity.issuer,
+        subject: identity.subject
+    });
+}
+
 function randomToken() {
     return randomBytes(32).toString('base64url');
 }
@@ -56,7 +80,9 @@ export function createSessionStore({
         }
     }
 
-    function create() {
+    function create(identity = null) {
+        const account = copyAccountIdentity(identity);
+
         purgeExpired();
 
         if (sessions.size >= maxSessions) {
@@ -69,6 +95,7 @@ export function createSessionStore({
 
         const session = Object.freeze({
             id,
+            account,
             csrfToken: randomToken(),
             createdAt,
             expiresAt: createdAt + ttlSeconds * 1000
@@ -107,20 +134,51 @@ export function createSessionStore({
         return sessions.delete(hashToken(token));
     }
 
-    function rotate(token) {
-        if (!get(token)) {
+    function rotate(token, identity = undefined) {
+        const previous = get(token);
+
+        if (!previous) {
             return null;
         }
 
+        const account = copyAccountIdentity(
+            identity === undefined
+                ? previous.account
+                : identity
+        );
+
         revoke(token);
 
-        return create();
+        return create(account);
+    }
+
+    function revokeAccount(identity) {
+        if (!validAccountIdentity(identity)) {
+            throw new Error('Invalid session account identity');
+        }
+
+        purgeExpired();
+
+        const revoked = [];
+
+        for (const [id, session] of sessions) {
+            if (
+                session.account?.issuer === identity.issuer &&
+                session.account.subject === identity.subject
+            ) {
+                sessions.delete(id);
+                revoked.push(id);
+            }
+        }
+
+        return revoked;
     }
 
     return Object.freeze({
         create,
         get,
         revoke,
+        revokeAccount,
         rotate,
         purgeExpired
     });

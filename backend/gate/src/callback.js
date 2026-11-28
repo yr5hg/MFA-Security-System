@@ -222,7 +222,10 @@ export async function handleOidcCallback({
         }
 
         // Prevent session fixation.
-        const rotated = sessions.rotate(sessionToken);
+        const rotated = sessions.rotate(
+            sessionToken,
+            identity
+        );
 
         if (!rotated) {
             throw new Error('Session rotation failed');

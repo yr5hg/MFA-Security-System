@@ -173,6 +173,28 @@ export function createApprovalStore({
         return entries.delete(identity.subject);
     }
 
+    function revokeForAccount(identity) {
+        if (!validIdentity(identity)) {
+            return 0;
+        }
+
+        purgeExpired();
+
+        let count = 0;
+
+        for (const [subject, entry] of entries) {
+            if (
+                subject === identity.subject ||
+                entry.approval.approvedBy === identity.subject
+            ) {
+                entries.delete(subject);
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     return Object.freeze({
         issue,
         get,
@@ -180,6 +202,7 @@ export function createApprovalStore({
         isClaimCurrent,
         consume,
         revoke,
+        revokeForAccount,
         purgeExpired
     });
 }

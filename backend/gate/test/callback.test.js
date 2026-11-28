@@ -292,3 +292,72 @@ test('token exchange failure invalidates attempt', async () => {
         null
     );
 });
+
+test('successful OIDC callback binds verified identity to the rotated session', async () => {
+    const data = setup();
+
+    const result = await handleOidcCallback(data);
+
+    const stored = data.sessions.get(
+        result.sessionToken
+    );
+
+    assert.deepEqual(stored.account, {
+        issuer: result.identity.issuer,
+        subject: result.identity.subject
+    });
+
+    assert.ok(Object.isFrozen(stored.account));
+
+    assert.equal(
+        stored.account.subject,
+        'test-account-id'
+    );
+
+    assert.equal(
+        data.sessions.revokeAccount(
+            result.identity
+        ).length,
+        1
+    );
+
+    assert.equal(
+        data.sessions.get(result.sessionToken),
+        null
+    );
+});
+
+test('global attempt invalidation prevents an in-flight OIDC callback from completing', async () => {
+    const data = setup();
+
+    const originalExchange = data.exchangeCode;
+
+    data.exchangeCode = async (...args) => {
+        data.attempts.cancelAll();
+
+        return originalExchange(...args);
+    };
+
+    await assert.rejects(
+        () => handleOidcCallback(data),
+        /OIDC callback validation failed/
+    );
+
+    const original = data.sessions.get(
+        data.sessionToken
+    );
+
+    assert.ok(original);
+
+    assert.equal(
+        original.account,
+        null
+    );
+
+    assert.equal(
+        data.attempts.getStatus(
+            data.originalSession.id
+        ),
+        null
+    );
+});

@@ -206,6 +206,14 @@ export function createAttemptStore({
         return attempts.delete(sessionId);
     }
 
+    function cancelAll() {
+        const count = attempts.size;
+
+        attempts.clear();
+
+        return count;
+    }
+
     function getStatus(sessionId) {
         const attempt = get(sessionId);
 
@@ -227,6 +235,7 @@ export function createAttemptStore({
         claimCallback,
         isClaimCurrent,
         cancel,
+        cancelAll,
         getStatus,
         purgeExpired
     });
