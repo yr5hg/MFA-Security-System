@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { loadOidcClients } from './oidc.js';
+import {
+    createReferenceStore
+} from './reference-store.js';
 
 try {
     const config = loadConfig();
@@ -21,10 +24,51 @@ try {
     console.log('TOTP OIDC client initialized');
     console.log('Face OIDC client initialized');
 
+    let faceDependencies = null;
+
+    if (config.faceSimilarityThreshold !== null) {
+        try {
+            const { default: faceModule } = await import(
+                '../../face-verifier/index.js'
+            );
+
+            const { default: policy } = await import(
+                '../../face-verifier/src/verification-policy.js'
+            );
+
+            const verifier = faceModule.createFaceVerifier({
+                threshold: config.faceSimilarityThreshold,
+                timeoutMs: config.inferenceTimeoutMs,
+                modelDir: config.humanModelDir
+            });
+
+            const references = createReferenceStore({
+                privateStateDir: config.privateStateDir,
+                issuer: config.keycloakIssuer,
+                policyVersion: policy.POLICY.version,
+                validateReference: policy.validReference
+            });
+
+            faceDependencies = {
+                verifier,
+                references,
+                policyVersion: policy.POLICY.version
+            };
+
+            console.log('Private face verifier initialized');
+
+        } catch {
+            console.warn(
+                'Face verification unavailable; TOTP remains independent'
+            );
+        }
+    }
+
     const server = createApp({
         tls,
         config,
-        clients
+        clients,
+        faceDependencies
     });
 
     server.requestTimeout = 15000;
