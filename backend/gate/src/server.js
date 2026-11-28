@@ -90,7 +90,11 @@ try {
             console.log(`Process UID: ${process.getuid()}`);
             console.log('OIDC authentication initialized');
             console.log('Protected operations enabled for verified TOTP');
-            console.log('Face-based protected execution remains disabled');
+            console.log(
+                faceDependencies
+                    ? 'Face-based execution available for enrolled accounts'
+                    : 'Face-based protected execution remains disabled'
+            );
         }
     );
 

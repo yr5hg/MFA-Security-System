@@ -611,7 +611,9 @@ export function createApp({
                     proofs: authentication,
                     operations,
                     sessionToken,
-                    introspect
+                    introspect,
+                    references:
+                        faceDependencies?.references ?? null
                 });
 
                 return sendJson(
