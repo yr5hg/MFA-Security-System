@@ -45,7 +45,8 @@ try {
             console.log(`Origin: ${config.gateOrigin}`);
             console.log(`Process UID: ${process.getuid()}`);
             console.log('OIDC authentication initialized');
-            console.log('Protected operations remain disabled');
+            console.log('Protected operations enabled for verified TOTP');
+            console.log('Face-based protected execution remains disabled');
         }
     );
 
