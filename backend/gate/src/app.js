@@ -202,6 +202,78 @@ export function createApp({
 
         let session = sessions.get(sessionToken);
 
+
+        // Temporary lab authentication testing interface.
+        if (
+            req.method === 'GET' &&
+            url.pathname === '/lab/login'
+        ) {
+            const headers = {};
+
+            if (!session) {
+                const created = sessions.create();
+
+                session = created.session;
+
+                headers['Set-Cookie'] =
+                    buildSessionCookie(created.token);
+            }
+
+            res.writeHead(200, {
+                ...SECURITY_HEADERS,
+                'Content-Type': 'text/html; charset=utf-8',
+                'Referrer-Policy': 'same-origin',
+                'Content-Security-Policy':
+                    "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://id.test:8443",
+                ...headers
+            });
+
+            return res.end(`
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>MFA Lab Test</title>
+                </head>
+                <body>
+                    <h1>MFA Authentication Test</h1>
+                    <p>Temporary integration testing interface.</p>
+
+                    <form method="POST" action="/attempts">
+                        <input
+                            type="hidden"
+                            name="csrfToken"
+                            value="${session.csrfToken}"
+                        >
+
+                        <label for="action">Requested action:</label>
+
+                        <select id="action" name="action">
+                            <option value="view">View</option>
+                            <option value="admin">Admin</option>
+                        </select>
+
+                        <br><br>
+
+                        <button name="method" value="totp">
+                            Password + TOTP
+                        </button>
+
+                        <button name="method" value="face">
+                            Password + Face
+                        </button>
+                    </form>
+
+                    <p>
+                        <a href="/attempts/current">
+                            Current authentication status
+                        </a>
+                    </p>
+                </body>
+                </html>
+            `);
+        }
+
         // Initialize an anonymous browser session if needed.
         if (
             req.method === 'GET' &&
@@ -284,7 +356,22 @@ export function createApp({
                     }
                 );
 
-            } catch {
+            } catch (error) {
+                const safeReasons = [
+                    'Invalid or expired session',
+                    'Invalid callback URL',
+                    'Duplicate callback parameter',
+                    'Invalid callback issuer',
+                    'Invalid authentication callback'
+                ];
+
+                if (safeReasons.includes(error?.message)) {
+                    console.warn(
+                        '[OIDC diagnostic]',
+                        error.message
+                    );
+                }
+
                 return sendJson(res, 401, {
                     error: 'authentication_failed'
                 });
