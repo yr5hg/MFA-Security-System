@@ -53,6 +53,7 @@ for file in \
     oidc.js \
     callback.js \
     evidence.js \
+    proof.js \
     server.js
 do
     install -m 644 -o root -g root \
