@@ -3,6 +3,11 @@ import {
     isActionAllowed
 } from './evidence.js';
 
+import {
+    hasCompletedFactors,
+    requireCurrentFaceReference
+} from './proof.js';
+
 export async function revalidateClaim({
     config,
     clients,
@@ -10,7 +15,8 @@ export async function revalidateClaim({
     proofs,
     sessionToken,
     claimed,
-    introspect
+    introspect,
+    references = null
 }) {
     const initialSession = sessions.get(sessionToken);
 
@@ -46,14 +52,7 @@ export async function revalidateClaim({
 
         const { evidence, identity, accessToken } = record;
 
-        // Only the completed TOTP route can execute in Part 4.
-        if (
-            evidence.method !== 'totp' ||
-            evidence.status !== 'totp_verified' ||
-            evidence.factors.passwordVerified !== true ||
-            evidence.factors.totpVerified !== true ||
-            evidence.factors.faceVerified !== false
-        ) {
+        if (!hasCompletedFactors(evidence)) {
             throw new Error(
                 'Authentication factors incomplete'
             );
@@ -68,6 +67,18 @@ export async function revalidateClaim({
             );
         }
 
+        if (
+            evidence.method === 'face' &&
+            config.faceSimilarityThreshold !== 0.66
+        ) {
+            throw new Error('Face execution unavailable');
+        }
+
+        requireCurrentFaceReference(
+            record,
+            references
+        );
+
         // Communicate with Keycloak again.
         const tokenEvidence = await inspectAccessToken({
             config,
@@ -81,6 +92,11 @@ export async function revalidateClaim({
         // The session or proof may have been invalidated
         // while waiting for Keycloak.
         requireCurrentClaim();
+
+        requireCurrentFaceReference(
+            record,
+            references
+        );
 
         if (tokenEvidence.expiresAt <= Date.now()) {
             throw new Error('Access token expired');
@@ -104,6 +120,7 @@ export async function revalidateClaim({
 
             method: evidence.method,
             action: evidence.action,
+            referenceVersion: evidence.referenceVersion,
 
             roles: tokenEvidence.roles,
 
