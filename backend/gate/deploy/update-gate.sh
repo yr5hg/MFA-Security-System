@@ -59,6 +59,8 @@ for file in \
     execution.js \
     face-flow.js \
     purpose.js \
+    approval-store.js \
+    approval-flow.js \
     reference-store.js \
     server.js
 do
