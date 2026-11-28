@@ -63,6 +63,7 @@ for file in \
     approval-flow.js \
     enrollment-flow.js \
     account-invalidation.js \
+    withdrawal-flow.js \
     reference-store.js \
     server.js
 do
