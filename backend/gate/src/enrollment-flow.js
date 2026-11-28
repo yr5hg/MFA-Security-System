@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import { revalidateClaim } from './authorization.js';
 import { hasCompletedFactors } from './proof.js';
+import { isEnrollmentAction } from './purpose.js';
+import { invalidateAccount } from './account-invalidation.js';
 
 const captureErrors = new Set([
     'INVALID_INPUT',
@@ -52,6 +54,7 @@ export function createEnrollmentFlow({
     config,
     clients,
     sessions,
+    attempts,
     proofs,
     approvals,
     references,
@@ -67,7 +70,7 @@ export function createEnrollmentFlow({
         return Boolean(
             record &&
             record.evidence.method === 'totp' &&
-            record.evidence.action === 'face_enroll' &&
+            isEnrollmentAction(record.evidence.action) &&
             record.evidence.authorized === false &&
             hasCompletedFactors(record.evidence)
         );
@@ -87,6 +90,12 @@ export function createEnrollmentFlow({
         return session;
     }
 
+    function operationFor(record) {
+        return record.evidence.action === 'face_replace'
+            ? 'replace'
+            : 'enroll';
+    }
+
     function matchingReference(identity, approval) {
         const reference = references.get(identity);
 
@@ -94,7 +103,13 @@ export function createEnrollmentFlow({
             reference.issuer === identity.issuer &&
             reference.subject === identity.subject &&
             reference.version === approval.referenceVersion &&
-            reference.reference === null
+            (
+                approval.operation === 'enroll'
+                    ? reference.reference === null
+                    : approval.operation === 'replace' &&
+                        reference.version > 0 &&
+                        reference.reference !== null
+            )
         );
     }
 
@@ -119,7 +134,10 @@ export function createEnrollmentFlow({
         try {
             const approval = approvals.get(record.identity);
 
-            if (!approval || approval.operation !== 'enroll') {
+            if (
+                !approval ||
+                approval.operation !== operationFor(record)
+            ) {
                 return {
                     enrollmentError: 'approval_required'
                 };
@@ -252,7 +270,7 @@ export function createEnrollmentFlow({
 
             approvalClaim = approvals.claim(
                 identity,
-                'enroll',
+                operationFor(record),
                 available.referenceVersion
             );
 
@@ -296,7 +314,7 @@ export function createEnrollmentFlow({
                     validated.issuer === identity.issuer &&
                     validated.subject === identity.subject &&
                     validated.method === 'totp' &&
-                    validated.action === 'face_enroll' &&
+                    validated.action === record.evidence.action &&
                     Number.isSafeInteger(validated.expiresAt) &&
                     validated.expiresAt > Date.now()
                 );
@@ -376,6 +394,20 @@ export function createEnrollmentFlow({
                 return failure(409, 'approval_unavailable');
             }
 
+            const replacing =
+                operationFor(record) === 'replace';
+
+            if (replacing) {
+                // Revoke old authorization before changing
+                // the biometric reference.
+                invalidateAccount({
+                    sessions,
+                    attempts,
+                    proofs,
+                    approvals
+                }, identity);
+            }
+
             // The reference store independently validates
             // the descriptor and expected reference version.
             references.save(
@@ -387,7 +419,9 @@ export function createEnrollmentFlow({
             return {
                 httpStatus: 201,
                 body: {
-                    status: 'face_enrolled'
+                    status: replacing
+                        ? 'face_replaced'
+                        : 'face_enrolled'
                 }
             };
 
