@@ -15,6 +15,7 @@ import { createProofStore } from './proof.js';
 import { createApprovalStore } from './approval-store.js';
 import { createFactorApproval } from './approval-flow.js';
 import { createEnrollmentFlow } from './enrollment-flow.js';
+import { isEnrollmentAction } from './purpose.js';
 import {
     createFaceFlow,
     readFaceJpeg
@@ -153,6 +154,7 @@ export function createApp({
                 config,
                 clients,
                 sessions,
+                attempts,
                 proofs: authentication,
                 approvals,
                 references: faceDependencies.references,
@@ -192,17 +194,13 @@ export function createApp({
                 action: record.evidence.action,
                 expiresAt: record.evidence.expiresAt,
 
-                ...(record.evidence.action === 'face_enroll'
+                ...(isEnrollmentAction(record.evidence.action)
                     ? enrollmentFlow
                         ? enrollmentFlow.issueChallenge(
                             session,
                             record
                         )
                         : { enrollmentError: 'enrollment_unavailable' }
-                    : {}),
-
-                ...(record.evidence.action === 'face_replace'
-                    ? { enrollmentError: 'replacement_unavailable' }
                     : {}),
 
                 ...(record.evidence.status === 'pending_face'
@@ -624,7 +622,7 @@ export function createApp({
             if (
                 record.evidence.method !== 'totp' ||
                 record.evidence.status !== 'totp_verified' ||
-                record.evidence.action !== 'face_enroll'
+                !isEnrollmentAction(record.evidence.action)
             ) {
                 return reject(
                     403,
