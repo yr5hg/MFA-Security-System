@@ -55,7 +55,8 @@ for file in \
     evidence.js \
     proof.js \
     resource.js \
-    authorizatoin.js \
+    authorization.js \
+    execution.js \
     server.js
 do
     install -m 644 -o root -g root \
