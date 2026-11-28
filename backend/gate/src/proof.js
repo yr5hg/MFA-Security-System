@@ -234,6 +234,58 @@ export function createProofStore({
         return getEntry(session)?.record ?? null;
     }
 
+    function completeFace(
+        session,
+        original,
+        referenceVersion,
+        tokenExpiresAt
+    ) {
+        const entry = getEntry(session);
+
+        if (
+            !entry ||
+            entry.record !== original ||
+            entry.claim !== null ||
+            original.evidence.method !== 'face' ||
+            original.evidence.status !== 'pending_face' ||
+            original.evidence.factors.passwordVerified !== true ||
+            original.evidence.factors.totpVerified !== false ||
+            original.evidence.factors.faceVerified !== false ||
+            !Number.isSafeInteger(referenceVersion) ||
+            referenceVersion < 1 ||
+            !Number.isSafeInteger(tokenExpiresAt) ||
+            tokenExpiresAt <= now()
+        ) {
+            return null;
+        }
+
+        const completed = Object.freeze({
+            ...original,
+
+            evidence: Object.freeze({
+                ...original.evidence,
+                status: 'face_verified',
+                authorized: false,
+                referenceVersion,
+
+                expiresAt: Math.min(
+                    original.evidence.expiresAt,
+                    tokenExpiresAt
+                ),
+
+                factors: Object.freeze({
+                    passwordVerified: true,
+                    totpVerified: false,
+                    faceVerified: true
+                })
+            })
+        });
+
+        entry.record = completed;
+
+        return completed;
+    }
+
     function claim(session) {
         const entry = getEntry(session);
 
@@ -293,6 +345,7 @@ export function createProofStore({
     return Object.freeze({
         save,
         get,
+        completeFace,
         claim,
         isClaimCurrent,
         consume,
