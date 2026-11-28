@@ -1,4 +1,5 @@
 import { revalidateClaim } from './authorization.js';
+import { isResourceAction } from './purpose.js';
 
 import {
     hasCompletedFactors,
@@ -56,6 +57,15 @@ export async function executeProtectedOperation({
 
     if (!hasCompletedFactors(record.evidence)) {
         return failure(403, 'authentication_incomplete');
+    }
+
+    // Enrollment and approval proofs are not
+    // ordinary protected-operation proofs.
+    if (!isResourceAction(record.evidence.action)) {
+        return failure(
+            403,
+            'incorrect_authentication_purpose'
+        );
     }
 
     // Claim before performing any asynchronous work.

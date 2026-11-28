@@ -8,6 +8,11 @@ import {
     requireCurrentFaceReference
 } from './proof.js';
 
+import {
+    isApprovalAction,
+    validAttemptPurpose
+} from './purpose.js';
+
 export async function revalidateClaim({
     config,
     clients,
@@ -52,7 +57,18 @@ export async function revalidateClaim({
 
         const { evidence, identity, accessToken } = record;
 
-        if (!hasCompletedFactors(evidence)) {
+        if (
+            !hasCompletedFactors(evidence) ||
+            !validAttemptPurpose(
+                evidence.method,
+                evidence.action,
+                evidence.targetSubject
+            ) ||
+            (
+                isApprovalAction(evidence.action) &&
+                evidence.targetSubject === identity.subject
+            )
+        ) {
             throw new Error(
                 'Authentication factors incomplete'
             );
@@ -120,6 +136,11 @@ export async function revalidateClaim({
 
             method: evidence.method,
             action: evidence.action,
+
+            ...(evidence.targetSubject !== undefined
+                ? { targetSubject: evidence.targetSubject }
+                : {}),
+
             referenceVersion: evidence.referenceVersion,
 
             roles: tokenEvidence.roles,
