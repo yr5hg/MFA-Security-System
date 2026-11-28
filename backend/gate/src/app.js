@@ -12,6 +12,10 @@ import {
 
 import { createAttemptStore } from './attempt.js';
 import { createProofStore } from './proof.js';
+import {
+    createFaceFlow,
+    readFaceJpeg
+} from './face-flow.js';
 import { createProtectedOperations } from './resource.js';
 import { executeProtectedOperation } from './execution.js';
 import { buildLoginUrl } from './oidc.js';
@@ -105,7 +109,8 @@ export function createApp({
     config = null,
     clients = null,
     exchangeCode,
-    introspect
+    introspect,
+    faceDependencies = null
 } = {}) {
     const sessions = createSessionStore();
 
@@ -115,6 +120,20 @@ export function createApp({
 
     // Sensitive authentication results remain server-side.
     const authentication = createProofStore();
+
+    const faceFlow = faceDependencies
+        ? createFaceFlow({
+            config,
+            clients,
+            sessions,
+            proofs: authentication,
+            references: faceDependencies.references,
+            verifier: faceDependencies.verifier,
+            policyVersion: faceDependencies.policyVersion,
+            now: faceDependencies.now,
+            introspect
+        })
+        : null;
 
     const operations = config?.protectedResourceFile
         ? createProtectedOperations({
@@ -143,7 +162,13 @@ export function createApp({
                 status: record.evidence.status,
                 method: record.evidence.method,
                 action: record.evidence.action,
-                expiresAt: record.evidence.expiresAt
+                expiresAt: record.evidence.expiresAt,
+
+                ...(record.evidence.status === 'pending_face'
+                    ? faceFlow
+                        ? faceFlow.issueChallenge(session, record)
+                        : { faceError: 'face_unavailable' }
+                    : {})
             };
         }
 
@@ -408,6 +433,100 @@ export function createApp({
                 return sendJson(res, 401, {
                     error: 'authentication_failed'
                 });
+            }
+        }
+
+        if (
+            req.method === 'POST' &&
+            url.pathname === '/face/verify'
+        ) {
+            if (!session) {
+                return sendJson(res, 401, {
+                    error: 'invalid_session'
+                });
+            }
+
+            if (!verifySameOrigin(
+                req.headers.origin,
+                config.gateOrigin
+            )) {
+                return sendJson(res, 403, {
+                    error: 'invalid_origin'
+                });
+            }
+
+            if (!verifyCsrf(
+                session,
+                req.headers['x-csrf-token']
+            )) {
+                return sendJson(res, 403, {
+                    error: 'invalid_csrf_token'
+                });
+            }
+
+            if (url.search) {
+                return sendJson(res, 400, {
+                    error: 'invalid_request'
+                });
+            }
+
+            if (!faceFlow) {
+                return sendJson(res, 503, {
+                    error: 'face_unavailable'
+                });
+            }
+
+            const record = authentication.get(session);
+
+            if (
+                !record ||
+                record.evidence.status !== 'pending_face'
+            ) {
+                return sendJson(res, 409, {
+                    error: 'face_attempt_unavailable'
+                });
+            }
+
+            const capture = await readFaceJpeg(
+                req,
+                config.captureMaxBytes
+            );
+
+            if (!capture.image) {
+                return sendJson(
+                    res,
+                    capture.httpStatus,
+                    capture.body
+                );
+            }
+
+            try {
+                const result = await faceFlow.verifyCapture({
+                    sessionToken,
+                    record,
+                    challengeToken:
+                        req.headers['x-capture-challenge'],
+                    image: capture.image
+                });
+
+                const headers =
+                    result.httpStatus === 429
+                        ? {
+                            'Retry-After': String(
+                                result.body.retryAfterSeconds
+                            )
+                        }
+                        : {};
+
+                return sendJson(
+                    res,
+                    result.httpStatus,
+                    result.body,
+                    headers
+                );
+
+            } finally {
+                capture.image.fill(0);
             }
         }
 
