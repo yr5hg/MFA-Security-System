@@ -14,6 +14,7 @@ import { createAttemptStore } from './attempt.js';
 import { createProofStore } from './proof.js';
 import { createApprovalStore } from './approval-store.js';
 import { createFactorApproval } from './approval-flow.js';
+import { createEnrollmentFlow } from './enrollment-flow.js';
 import {
     createFaceFlow,
     readFaceJpeg
@@ -144,6 +145,23 @@ export function createApp({
         })
         : null;
 
+    const enrollmentFlow =
+        approvals &&
+        typeof faceDependencies?.verifier?.enroll === 'function' &&
+        typeof faceDependencies?.references?.save === 'function'
+            ? createEnrollmentFlow({
+                config,
+                clients,
+                sessions,
+                proofs: authentication,
+                approvals,
+                references: faceDependencies.references,
+                verifier: faceDependencies.verifier,
+                policyVersion: faceDependencies.policyVersion,
+                introspect
+            })
+            : null;
+
     const operations = config?.protectedResourceFile
         ? createProtectedOperations({
             resourceFile: config.protectedResourceFile
@@ -173,6 +191,19 @@ export function createApp({
                 method: record.evidence.method,
                 action: record.evidence.action,
                 expiresAt: record.evidence.expiresAt,
+
+                ...(record.evidence.action === 'face_enroll'
+                    ? enrollmentFlow
+                        ? enrollmentFlow.issueChallenge(
+                            session,
+                            record
+                        )
+                        : { enrollmentError: 'enrollment_unavailable' }
+                    : {}),
+
+                ...(record.evidence.action === 'face_replace'
+                    ? { enrollmentError: 'replacement_unavailable' }
+                    : {}),
 
                 ...(record.evidence.status === 'pending_face'
                     ? faceFlow
@@ -533,6 +564,107 @@ export function createApp({
                     result.httpStatus,
                     result.body,
                     headers
+                );
+
+            } finally {
+                capture.image.fill(0);
+            }
+        }
+
+        if (
+            req.method === 'POST' &&
+            url.pathname === '/face/enroll'
+        ) {
+            function reject(status, error) {
+                req.resume();
+
+                return sendJson(res, status, {
+                    error
+                });
+            }
+
+            if (!session) {
+                return reject(401, 'invalid_session');
+            }
+
+            if (!verifySameOrigin(
+                req.headers.origin,
+                config.gateOrigin
+            )) {
+                return reject(403, 'invalid_origin');
+            }
+
+            if (!verifyCsrf(
+                session,
+                req.headers['x-csrf-token']
+            )) {
+                return reject(403, 'invalid_csrf_token');
+            }
+
+            if (url.search) {
+                return reject(400, 'invalid_request');
+            }
+
+            if (!enrollmentFlow) {
+                return reject(
+                    503,
+                    'enrollment_unavailable'
+                );
+            }
+
+            const record = authentication.get(session);
+
+            if (!record) {
+                return reject(
+                    409,
+                    'enrollment_attempt_unavailable'
+                );
+            }
+
+            if (
+                record.evidence.method !== 'totp' ||
+                record.evidence.status !== 'totp_verified' ||
+                record.evidence.action !== 'face_enroll'
+            ) {
+                return reject(
+                    403,
+                    'incorrect_authentication_purpose'
+                );
+            }
+
+            if (
+                req.headers['x-enrollment-consent'] !== 'true'
+            ) {
+                return reject(400, 'consent_required');
+            }
+
+            const capture = await readFaceJpeg(
+                req,
+                config.captureMaxBytes
+            );
+
+            if (!capture.image) {
+                return sendJson(
+                    res,
+                    capture.httpStatus,
+                    capture.body
+                );
+            }
+
+            try {
+                const result = await enrollmentFlow.enroll({
+                    sessionToken,
+                    record,
+                    challengeToken:
+                        req.headers['x-capture-challenge'],
+                    consent: true,
+                    image: capture.image
+                });
+
+                return sendJson(
+                    res,
+                    result.httpStatus,
+                    result.body
                 );
 
             } finally {
