@@ -69,6 +69,7 @@ async function withApp(
         face: mockClient('face')
     };
 
+    let mockSubject = 'test-account';
     let amrOverride;
     let introspectionOverrides = {};
     let introspectionHook = null;
@@ -85,7 +86,7 @@ async function withApp(
 
             claims: () => ({
                 iss: config.keycloakIssuer,
-                sub: 'test-account',
+                sub: mockSubject,
                 aud: clientId,
                 nonce: checks.expectedNonce,
                 auth_time: now,
@@ -109,7 +110,7 @@ async function withApp(
         return {
             active: true,
             iss: config.keycloakIssuer,
-            sub: 'test-account',
+            sub: mockSubject,
             client_id: clientId,
             azp: clientId,
             aud: [clientId, 'lab-resource'],
@@ -217,6 +218,27 @@ async function withApp(
         });
     }
 
+    async function postEnrollment(
+        challenge,
+        image = Buffer.from([255, 216, 255, 217]),
+        headers = {}
+    ) {
+        return request('/face/enroll', {
+            method: 'POST',
+
+            headers: {
+                'Content-Type': 'image/jpeg',
+                Origin: config.gateOrigin,
+                'X-CSRF-Token': csrfToken,
+                'X-Capture-Challenge': challenge,
+                'X-Enrollment-Consent': 'true',
+                ...headers
+            },
+
+            body: image
+        });
+    }
+
     async function begin(method = 'totp', action = 'view') {
         const response = await post('/attempts', {
             method,
@@ -248,7 +270,12 @@ async function withApp(
             initialize,
             post,
             postFace,
+            postEnrollment,
             begin,
+
+            setSubject: subject => {
+                mockSubject = subject;
+            },
 
             getCookie: () => cookie,
 
@@ -2285,5 +2312,572 @@ test('new administrator proof cannot overwrite an outstanding approval', async (
         const current = await app.initialize();
 
         assert.equal(current.status, 'idle');
+    });
+});
+
+const ENROLLMENT_ISSUER =
+    'https://id.test:8443/realms/multi-factor-authentication';
+
+const ENROLLMENT_OWNER = {
+    issuer: ENROLLMENT_ISSUER,
+    subject: APPROVAL_TARGET
+};
+
+function syntheticReference() {
+    return {
+        policyVersion: FACE_POLICY_VERSION,
+        descriptor: Array(1024).fill(1)
+    };
+}
+
+async function withEnrollment(callback) {
+    const { createReferenceStore } = await import(
+        '../src/reference-store.js'
+    );
+
+    const directory = mkdtempSync(
+        join(tmpdir(), 'mfa-enrollment-test-')
+    );
+
+    const references = createReferenceStore({
+        privateStateDir: directory,
+        issuer: ENROLLMENT_ISSUER,
+        policyVersion: FACE_POLICY_VERSION,
+
+        validateReference: reference =>
+            reference.policyVersion === FACE_POLICY_VERSION &&
+            Array.isArray(reference.descriptor) &&
+            reference.descriptor.length === 1024 &&
+            reference.descriptor.every(Number.isFinite)
+    });
+
+    const fixture = createFaceFixture();
+
+    fixture.dependencies.references = references;
+
+    const state = {
+        calls: 0,
+        hook: null,
+
+        outcome: {
+            ok: true,
+            policyVersion: FACE_POLICY_VERSION,
+            inferenceMs: 10,
+            reference: syntheticReference()
+        }
+    };
+
+    fixture.dependencies.verifier.enroll = async image => {
+        assert.ok(Buffer.isBuffer(image));
+
+        state.calls++;
+
+        if (state.hook) {
+            await state.hook();
+        }
+
+        return state.outcome;
+    };
+
+    try {
+        await withApp(
+            app => callback(app, state, references),
+            {
+                enableOperations: true,
+                faceDependencies: fixture.dependencies
+            }
+        );
+
+    } finally {
+        rmSync(directory, {
+            recursive: true,
+            force: true
+        });
+    }
+}
+
+async function approveOwner(app) {
+    await authenticateApprover(app);
+
+    const approval = await app.post(
+        '/factor/approvals',
+        approvalBody()
+    );
+
+    assert.equal(approval.status, 201);
+}
+
+async function loginEnrollmentOwner(
+    app,
+    subject = APPROVAL_TARGET,
+    action = 'face_enroll'
+) {
+    const logout = await app.post('/logout');
+
+    assert.equal(logout.status, 200);
+
+    app.setSubject(subject);
+    app.setIntrospection({});
+
+    await authenticate(app, action, 'totp');
+
+    return app.initialize();
+}
+
+async function prepareEnrollment(app) {
+    await approveOwner(app);
+
+    const current = await loginEnrollmentOwner(app);
+
+    assert.equal(current.status, 'totp_verified');
+    assert.equal(current.action, 'face_enroll');
+    assert.ok(current.captureChallenge);
+
+    return current;
+}
+
+test('approved owner enrolls a private reference only once', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        const refreshed = await app.initialize();
+
+        assert.equal(
+            refreshed.captureChallenge,
+            current.captureChallenge
+        );
+
+        assert.equal(
+            refreshed.captureChallengeExpiresAt,
+            current.captureChallengeExpiresAt
+        );
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 201);
+
+        assert.deepEqual(
+            await response.json(),
+            { status: 'face_enrolled' }
+        );
+
+        const stored = references.get(ENROLLMENT_OWNER);
+
+        assert.equal(stored.version, 1);
+        assert.equal(stored.subject, APPROVAL_TARGET);
+
+        assert.deepEqual(
+            stored.reference.descriptor,
+            syntheticReference().descriptor
+        );
+
+        assert.equal(state.calls, 1);
+
+        assert.equal(
+            references.get({
+                issuer: ENROLLMENT_ISSUER,
+                subject: 'test-account'
+            }).reference,
+            null
+        );
+
+        const replay = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(replay.status, 409);
+
+        const execute = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(execute.status, 409);
+
+        await authenticate(app, 'face_enroll', 'totp');
+
+        const noApproval = await app.initialize();
+
+        assert.equal(
+            noApproval.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(
+            noApproval.captureChallenge,
+            undefined
+        );
+    });
+});
+
+test('owner without administrator approval cannot enroll', async () => {
+    await withEnrollment(async (app, state, references) => {
+        app.setSubject(APPROVAL_TARGET);
+
+        await authenticate(app, 'face_enroll', 'totp');
+
+        const current = await app.initialize();
+
+        assert.equal(
+            current.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(current.captureChallenge, undefined);
+
+        const response = await app.postEnrollment(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 409);
+        assert.equal(state.calls, 0);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).reference,
+            null
+        );
+    });
+});
+
+test('approval cannot be used by a different account', async () => {
+    await withEnrollment(async (app, state) => {
+        await approveOwner(app);
+
+        const current = await loginEnrollmentOwner(
+            app,
+            'different-account'
+        );
+
+        assert.equal(
+            current.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(current.captureChallenge, undefined);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('ordinary resource authentication cannot enroll a face', async () => {
+    await withEnrollment(async (app, state) => {
+        app.setSubject(APPROVAL_TARGET);
+
+        await authenticate(app, 'view', 'totp');
+
+        const response = await app.postEnrollment(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 403);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('enrollment enforces consent session origin CSRF and JPEG validation', async () => {
+    await withEnrollment(async (app, state) => {
+        const anonymous = await app.postEnrollment(
+            'x'.repeat(43)
+        );
+
+        assert.equal(anonymous.status, 401);
+
+        const current = await prepareEnrollment(app);
+
+        for (const [headers, expected] of [
+            [{ 'X-Enrollment-Consent': 'false' }, 400],
+            [{ Origin: 'https://untrusted.test' }, 403],
+            [{ 'X-CSRF-Token': 'invalid' }, 403],
+            [{ 'Content-Type': 'text/plain' }, 415]
+        ]) {
+            const response = await app.postEnrollment(
+                current.captureChallenge,
+                undefined,
+                headers
+            );
+
+            assert.equal(response.status, expected);
+        }
+
+        const oversized = await app.postEnrollment(
+            current.captureChallenge,
+            Buffer.alloc(1048577)
+        );
+
+        assert.equal(oversized.status, 413);
+
+        const wrongChallenge = await app.postEnrollment(
+            'x'.repeat(43)
+        );
+
+        assert.equal(wrongChallenge.status, 409);
+        assert.equal(state.calls, 0);
+
+        const valid = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(valid.status, 201);
+    });
+});
+
+test('expired enrollment challenge cannot be submitted', async t => {
+    t.mock.timers.enable({
+        apis: ['Date']
+    });
+
+    await withEnrollment(async (app, state) => {
+        const current = await prepareEnrollment(app);
+
+        t.mock.timers.tick(61000);
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'capture_expired' }
+        );
+
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('expired administrator approval cannot enable enrollment', async t => {
+    t.mock.timers.enable({
+        apis: ['Date']
+    });
+
+    await withEnrollment(async (app, state) => {
+        await approveOwner(app);
+
+        t.mock.timers.tick(601000);
+
+        const current = await loginEnrollmentOwner(app);
+
+        assert.equal(
+            current.enrollmentError,
+            'approval_required'
+        );
+
+        assert.equal(current.captureChallenge, undefined);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('owner token revocation during inference prevents enrollment', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        state.hook = async () => {
+            app.setIntrospection({
+                active: false
+            });
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 403);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).reference,
+            null
+        );
+    });
+});
+
+test('cancellation during enrollment inference prevents storage', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        state.hook = async () => {
+            const cancelled = await app.post(
+                '/attempts/cancel'
+            );
+
+            assert.equal(cancelled.status, 200);
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).reference,
+            null
+        );
+    });
+});
+
+test('reference change during enrollment prevents overwrite', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        const otherReference = {
+            policyVersion: FACE_POLICY_VERSION,
+            descriptor: Array(1024).fill(0.5)
+        };
+
+        state.hook = async () => {
+            references.save(
+                ENROLLMENT_OWNER,
+                otherReference,
+                0
+            );
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+
+        const stored = references.get(ENROLLMENT_OWNER);
+
+        assert.equal(stored.version, 1);
+
+        assert.deepEqual(
+            stored.reference.descriptor,
+            otherReference.descriptor
+        );
+    });
+});
+
+test('invalid face capture consumes the accepted enrollment approval', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        state.outcome = {
+            ok: false,
+            code: 'MULTIPLE_FACES',
+            policyVersion: FACE_POLICY_VERSION
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 400);
+
+        assert.deepEqual(
+            await response.json(),
+            { error: 'invalid_face_capture' }
+        );
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).reference,
+            null
+        );
+
+        await authenticate(app, 'face_enroll', 'totp');
+
+        const next = await app.initialize();
+
+        assert.equal(
+            next.enrollmentError,
+            'approval_required'
+        );
+    });
+});
+
+test('concurrent enrollment requests cannot reuse one approval', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        const responses = await Promise.all([
+            app.postEnrollment(current.captureChallenge),
+            app.postEnrollment(current.captureChallenge)
+        ]);
+
+        const statuses = responses
+            .map(response => response.status)
+            .sort((a, b) => a - b);
+
+        assert.deepEqual(statuses, [201, 409]);
+        assert.equal(state.calls, 1);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).version,
+            1
+        );
+    });
+});
+
+test('reference replacement remains disabled until recovery safeguards are implemented', async () => {
+    await withEnrollment(async (app, state, references) => {
+        references.save(
+            ENROLLMENT_OWNER,
+            syntheticReference(),
+            0
+        );
+
+        await authenticateApprover(app, 'replace');
+
+        const approval = await app.post(
+            '/factor/approvals',
+            approvalBody('replace')
+        );
+
+        assert.equal(approval.status, 201);
+
+        const current = await loginEnrollmentOwner(
+            app,
+            APPROVAL_TARGET,
+            'face_replace'
+        );
+
+        assert.equal(
+            current.enrollmentError,
+            'replacement_unavailable'
+        );
+
+        const response = await app.postEnrollment(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 403);
+        assert.equal(state.calls, 0);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).version,
+            1
+        );
+    });
+});
+
+test('enrollment worker exception fails closed without storing a reference', async () => {
+    await withEnrollment(async (app, state, references) => {
+        const current = await prepareEnrollment(app);
+
+        state.hook = async () => {
+            throw new Error('Simulated worker failure');
+        };
+
+        const response = await app.postEnrollment(
+            current.captureChallenge
+        );
+
+        assert.equal(response.status, 503);
+
+        assert.equal(
+            references.get(ENROLLMENT_OWNER).reference,
+            null
+        );
+
+        await authenticate(app, 'face_enroll', 'totp');
+
+        const next = await app.initialize();
+
+        assert.equal(
+            next.enrollmentError,
+            'approval_required'
+        );
     });
 });
