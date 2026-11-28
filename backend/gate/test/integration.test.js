@@ -9,7 +9,7 @@ import { createApp } from '../src/app.js';
 
 async function withApp(
     callback,
-    { enableOperations = false } = {}
+    { enableOperations = false, faceDependencies = null } = {}
 ) {
     const config = {
         gateOrigin: '',
@@ -21,6 +21,17 @@ async function withApp(
         resourceAudience: 'lab-resource',
         attemptTtlSeconds: 300
     };
+
+    if (faceDependencies) {
+        Object.assign(config, {
+            faceSimilarityThreshold: 0.66,
+            captureChallengeTtlSeconds: 60,
+            captureMaxBytes: 1048576,
+            faceFailureLimit: 3,
+            faceFailureWindowSeconds: 300,
+            faceCooldownSeconds: 300
+        });
+    }
 
     let resourceDirectory;
 
@@ -115,7 +126,8 @@ async function withApp(
         config,
         clients,
         exchangeCode,
-        introspect
+        introspect,
+        faceDependencies
     });
 
     await new Promise((resolve, reject) => {
@@ -185,6 +197,26 @@ async function withApp(
         });
     }
 
+    async function postFace(
+        challenge,
+        image = Buffer.from([255, 216, 255, 217]),
+        headers = {}
+    ) {
+        return request('/face/verify', {
+            method: 'POST',
+
+            headers: {
+                'Content-Type': 'image/jpeg',
+                Origin: config.gateOrigin,
+                'X-CSRF-Token': csrfToken,
+                'X-Capture-Challenge': challenge,
+                ...headers
+            },
+
+            body: image
+        });
+    }
+
     async function begin(method = 'totp', action = 'view') {
         const response = await post('/attempts', {
             method,
@@ -215,6 +247,7 @@ async function withApp(
             request,
             initialize,
             post,
+            postFace,
             begin,
 
             getCookie: () => cookie,
@@ -782,5 +815,517 @@ test('resource failure consumes proof and prevents retry', async () => {
         );
 
         assert.equal(retry.status, 409);
+    });
+});
+const FACE_POLICY_VERSION =
+    'human-3.3.6-wasm-lab-v1';
+
+function createFaceFixture() {
+    const state = {
+        version: 1,
+        enrolled: true,
+        calls: 0,
+        offset: 0,
+        hook: null,
+
+        outcome: {
+            ok: true,
+            matched: true,
+            code: 'MATCH',
+            threshold: 0.66,
+            similarity: 0.80,
+            policyVersion: FACE_POLICY_VERSION
+        }
+    };
+
+    function checkIdentity(identity) {
+        assert.equal(
+            identity.issuer,
+            'https://id.test:8443/realms/multi-factor-authentication'
+        );
+
+        assert.equal(
+            identity.subject,
+            'test-account'
+        );
+    }
+
+    const dependencies = {
+        policyVersion: FACE_POLICY_VERSION,
+
+        now: () => Date.now() + state.offset,
+
+        references: {
+            get(identity) {
+                checkIdentity(identity);
+
+                return {
+                    issuer: identity.issuer,
+                    subject: identity.subject,
+                    version: state.version,
+
+                    reference: state.enrolled
+                        ? {
+                            policyVersion: FACE_POLICY_VERSION,
+                            descriptor: Array(1024).fill(1)
+                        }
+                        : null
+                };
+            },
+
+            isCurrent(identity, version) {
+                checkIdentity(identity);
+
+                return (
+                    state.enrolled &&
+                    version === state.version
+                );
+            }
+        },
+
+        verifier: {
+            async verify(image, reference) {
+                assert.ok(Buffer.isBuffer(image));
+                assert.equal(
+                    reference.descriptor.length,
+                    1024
+                );
+
+                state.calls++;
+
+                if (state.hook) {
+                    await state.hook();
+                }
+
+                return state.outcome;
+            }
+        }
+    };
+
+    return {
+        state,
+        dependencies
+    };
+}
+
+async function withFace(callback) {
+    const fixture = createFaceFixture();
+
+    await withApp(
+        app => callback(app, fixture.state),
+        {
+            enableOperations: true,
+            faceDependencies: fixture.dependencies
+        }
+    );
+}
+
+async function beginFace(app) {
+    await authenticate(app, 'view', 'face');
+
+    return app.initialize();
+}
+
+test('disabled face verifier fails closed', async () => {
+    await withOperations(async app => {
+        await beginFace(app);
+
+        const response = await app.postFace(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 503);
+    });
+});
+
+test('face verification requires an authenticated session', async () => {
+    await withFace(async app => {
+        const response = await app.postFace(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 401);
+    });
+});
+
+test('valid match completes face factor but cannot execute yet', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        assert.equal(status.captureChallenge.length, 43);
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 200);
+
+        assert.deepEqual(
+            await response.json(),
+            { status: 'face_verified' }
+        );
+
+        assert.equal(state.calls, 1);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'face_verified');
+        assert.equal(current.captureChallenge, undefined);
+        assert.equal(current.descriptor, undefined);
+        assert.equal(current.similarity, undefined);
+        assert.equal(current.accessToken, undefined);
+
+        const replay = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(replay.status, 409);
+
+        const execute = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(execute.status, 403);
+    });
+});
+
+test('refreshing status does not replace or extend challenge', async () => {
+    await withFace(async app => {
+        const first = await beginFace(app);
+        const second = await app.initialize();
+
+        assert.equal(
+            second.captureChallenge,
+            first.captureChallenge
+        );
+
+        assert.equal(
+            second.captureChallengeExpiresAt,
+            first.captureChallengeExpiresAt
+        );
+    });
+});
+
+test('face endpoint rejects cross-origin and invalid CSRF requests', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        const crossOrigin = await app.postFace(
+            status.captureChallenge,
+            undefined,
+            { Origin: 'https://untrusted.test' }
+        );
+
+        assert.equal(crossOrigin.status, 403);
+
+        const csrf = await app.postFace(
+            status.captureChallenge,
+            undefined,
+            { 'X-CSRF-Token': 'invalid' }
+        );
+
+        assert.equal(csrf.status, 403);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('incorrect capture challenge is denied', async () => {
+    await withFace(async (app, state) => {
+        await beginFace(app);
+
+        const response = await app.postFace(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 409);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('unsupported image content type is denied', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        const response = await app.postFace(
+            status.captureChallenge,
+            Buffer.from('not an image'),
+            { 'Content-Type': 'text/plain' }
+        );
+
+        assert.equal(response.status, 415);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('oversized image is denied before inference', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        const response = await app.postFace(
+            status.captureChallenge,
+            Buffer.alloc(1048577)
+        );
+
+        assert.equal(response.status, 413);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('missing enrollment prevents challenge issuance', async () => {
+    await withFace(async (app, state) => {
+        state.enrolled = false;
+
+        const status = await beginFace(app);
+
+        assert.equal(
+            status.faceError,
+            'face_not_enrolled'
+        );
+
+        assert.equal(status.captureChallenge, undefined);
+
+        const response = await app.postFace(
+            'x'.repeat(43)
+        );
+
+        assert.equal(response.status, 409);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('expired capture challenge cannot be used', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        state.offset = 61000;
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+        assert.equal(state.calls, 0);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('method switching invalidates the previous challenge', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        await authenticate(app, 'view', 'totp');
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+        assert.equal(state.calls, 0);
+    });
+});
+
+test('reference replacement during inference prevents completion', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        state.hook = async () => {
+            state.version++;
+        };
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+
+        const body = await response.json();
+
+        assert.equal(body.error, 'reference_changed');
+    });
+});
+
+test('cancellation during face inference prevents completion', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        state.hook = async () => {
+            const cancelled = await app.post(
+                '/attempts/cancel'
+            );
+
+            assert.equal(cancelled.status, 200);
+        };
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 409);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('revoked access token prevents face completion', async () => {
+    await withFace(async app => {
+        const status = await beginFace(app);
+
+        app.setIntrospection({
+            active: false
+        });
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 403);
+    });
+});
+
+test('invalid worker similarity cannot complete authentication', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        state.outcome.similarity = NaN;
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 503);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('three mismatches trigger account cooldown while TOTP remains independent', async t => {
+    t.mock.timers.enable({
+        apis: ['Date']
+    });
+
+    await withFace(async (app, state) => {
+        state.outcome = {
+            ok: false,
+            matched: false,
+            code: 'FACE_MISMATCH',
+            policyVersion: FACE_POLICY_VERSION
+        };
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const status = await beginFace(app);
+
+            const response = await app.postFace(
+                status.captureChallenge
+            );
+
+            assert.equal(
+                response.status,
+                attempt === 3 ? 429 : 403
+            );
+        }
+
+        const blocked = await beginFace(app);
+
+        assert.equal(
+            blocked.faceError,
+            'face_cooldown'
+        );
+
+        assert.ok(blocked.retryAfterSeconds > 0);
+        assert.equal(blocked.captureChallenge, undefined);
+        assert.equal(state.calls, 3);
+
+        const denied = await app.postFace(
+            'x'.repeat(43)
+        );
+
+        assert.equal(denied.status, 429);
+
+        await authenticate(app, 'view', 'totp');
+
+        const execute = await app.post(
+            '/operations/execute'
+        );
+
+        assert.equal(execute.status, 200);
+
+        t.mock.timers.tick(301000);
+
+const recovered = await beginFace(app);
+
+assert.equal(recovered.status, 'pending_face');
+assert.equal(recovered.faceError, undefined);
+assert.ok(recovered.captureChallenge);
+    });
+});
+
+test('worker exception invalidates the face attempt', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        state.hook = async () => {
+            throw new Error('Simulated worker failure');
+        };
+
+        const response = await app.postFace(
+            status.captureChallenge
+        );
+
+        assert.equal(response.status, 503);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('concurrent capture requests cannot reuse one challenge', async () => {
+    await withFace(async (app, state) => {
+        const status = await beginFace(app);
+
+        let entered;
+        let release;
+
+        const started = new Promise(resolve => {
+            entered = resolve;
+        });
+
+        const wait = new Promise(resolve => {
+            release = resolve;
+        });
+
+        state.hook = async () => {
+            entered();
+            await wait;
+        };
+
+        const first = app.postFace(
+            status.captureChallenge
+        );
+
+        await started;
+
+        try {
+            const duplicate = await app.postFace(
+                status.captureChallenge
+            );
+
+            assert.equal(duplicate.status, 409);
+
+        } finally {
+            release();
+        }
+
+        const response = await first;
+
+        assert.equal(response.status, 200);
+        assert.equal(state.calls, 1);
     });
 });
