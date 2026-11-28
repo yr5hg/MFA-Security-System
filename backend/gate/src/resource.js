@@ -11,6 +11,11 @@ import { isAbsolute } from 'node:path';
 
 import { isActionAllowed } from './evidence.js';
 
+import {
+    hasCompletedFactors,
+    requireCurrentFaceReference
+} from './proof.js';
+
 const MAX_RESOURCE_BYTES = 65536;
 
 export function createProtectedOperations({
@@ -81,7 +86,7 @@ export function createProtectedOperations({
         }
     }
 
-    function execute(record, currentRoles) {
+    function execute(record, currentRoles, references = null) {
         const evidence = record?.evidence;
 
         if (!evidence) {
@@ -95,14 +100,7 @@ export function createProtectedOperations({
             throw new Error('Authentication proof expired');
         }
 
-        // Only TOTP is supported for execution in Part 4.
-        if (
-            evidence.method !== 'totp' ||
-            evidence.status !== 'totp_verified' ||
-            evidence.factors?.passwordVerified !== true ||
-            evidence.factors?.totpVerified !== true ||
-            evidence.factors?.faceVerified !== false
-        ) {
+        if (!hasCompletedFactors(evidence)) {
             throw new Error('Authentication factors incomplete');
         }
 
@@ -119,6 +117,13 @@ export function createProtectedOperations({
         ) {
             throw new Error('Insufficient application role');
         }
+
+        // Defense in depth: validate the active face
+        // reference at the resource boundary.
+        requireCurrentFaceReference(
+            record,
+            references
+        );
 
         const content = readResource();
 
