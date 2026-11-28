@@ -1647,3 +1647,222 @@ test('expired completed face proof cannot execute', async t => {
         assert.equal(result.content, undefined);
     });
 });
+for (const action of [
+    'approve_enroll',
+    'approve_replace'
+]) {
+    test(`${action} proof cannot execute ordinary resources`, async () => {
+        await withOperations(async app => {
+            await app.initialize();
+
+            app.setIntrospection({
+                realm_access: {
+                    roles: ['administrator']
+                }
+            });
+
+            const start = await app.post('/attempts', {
+                method: 'totp',
+                action,
+                targetSubject: 'target-account'
+            });
+
+            assert.equal(start.status, 303);
+
+            const login = new URL(
+                start.headers.get('location')
+            );
+
+            const query = new URLSearchParams({
+                code: 'test-code',
+                state: login.searchParams.get('state'),
+                iss: 'https://id.test:8443/realms/multi-factor-authentication'
+            });
+
+            const callback = await app.request(
+                `/oidc/totp/callback?${query}`
+            );
+
+            assert.equal(callback.status, 303);
+
+            const current = await app.initialize();
+
+            assert.equal(current.status, 'totp_verified');
+            assert.equal(current.action, action);
+
+            const execute = await app.post(
+                '/operations/execute'
+            );
+
+            assert.equal(execute.status, 403);
+
+            assert.deepEqual(
+                await execute.json(),
+                {
+                    error: 'incorrect_authentication_purpose'
+                }
+            );
+
+            const remaining = await app.initialize();
+
+            assert.equal(remaining.action, action);
+        });
+    });
+}
+
+for (const action of [
+    'face_enroll',
+    'face_replace'
+]) {
+    test(`${action} owner proof cannot execute ordinary resources`, async () => {
+        await withOperations(async app => {
+            await authenticate(app, action, 'totp');
+
+            const current = await app.initialize();
+
+            assert.equal(current.status, 'totp_verified');
+            assert.equal(current.action, action);
+
+            const execute = await app.post(
+                '/operations/execute'
+            );
+
+            assert.equal(execute.status, 403);
+
+            assert.deepEqual(
+                await execute.json(),
+                {
+                    error: 'incorrect_authentication_purpose'
+                }
+            );
+        });
+    });
+}
+
+test('regular user cannot obtain administrator approval proof', async () => {
+    await withOperations(async app => {
+        await app.initialize();
+
+        const start = await app.post('/attempts', {
+            method: 'totp',
+            action: 'approve_enroll',
+            targetSubject: 'target-account'
+        });
+
+        assert.equal(start.status, 303);
+
+        const login = new URL(
+            start.headers.get('location')
+        );
+
+        const query = new URLSearchParams({
+            code: 'test-code',
+            state: login.searchParams.get('state'),
+            iss: 'https://id.test:8443/realms/multi-factor-authentication'
+        });
+
+        const callback = await app.request(
+            `/oidc/totp/callback?${query}`
+        );
+
+        assert.equal(callback.status, 401);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
+
+test('administrator cannot approve their own enrollment', async () => {
+    await withOperations(async app => {
+        await app.initialize();
+
+        app.setIntrospection({
+            realm_access: {
+                roles: ['administrator']
+            }
+        });
+
+        const start = await app.post('/attempts', {
+            method: 'totp',
+            action: 'approve_enroll',
+            targetSubject: 'test-account'
+        });
+
+        assert.equal(start.status, 303);
+
+        const login = new URL(
+            start.headers.get('location')
+        );
+
+        const query = new URLSearchParams({
+            code: 'test-code',
+            state: login.searchParams.get('state'),
+            iss: 'https://id.test:8443/realms/multi-factor-authentication'
+        });
+
+        const callback = await app.request(
+            `/oidc/totp/callback?${query}`
+        );
+
+        assert.equal(callback.status, 401);
+    });
+});
+
+test('face method cannot begin sensitive biometric operations', async () => {
+    await withOperations(async app => {
+        await app.initialize();
+
+        for (const action of [
+            'approve_enroll',
+            'approve_replace',
+            'face_enroll',
+            'face_replace'
+        ]) {
+            const response = await app.post('/attempts', {
+                method: 'face',
+                action,
+
+                ...(action.startsWith('approve_')
+                    ? { targetSubject: 'target-account' }
+                    : {})
+            });
+
+            assert.equal(response.status, 400);
+        }
+    });
+});
+
+test('approval without target account is rejected', async () => {
+    await withOperations(async app => {
+        await app.initialize();
+
+        const response = await app.post('/attempts', {
+            method: 'totp',
+            action: 'approve_enroll'
+        });
+
+        assert.equal(response.status, 400);
+    });
+});
+
+test('password-only authentication cannot create enrollment proof', async () => {
+    await withOperations(async app => {
+        await app.initialize();
+
+        app.setAmr(['pwd']);
+
+        const { callbackPath } = await app.begin(
+            'totp',
+            'face_enroll'
+        );
+
+        const callback = await app.request(callbackPath);
+
+        assert.equal(callback.status, 401);
+
+        const current = await app.initialize();
+
+        assert.equal(current.status, 'idle');
+    });
+});
